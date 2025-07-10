@@ -137,15 +137,70 @@ if credentials:
         
         if st.button("Process Bulk Update", type="primary"):
             if uploaded_file is not None:
-                try:
-                    df = pd.read_csv(uploaded_file, dtype=str).fillna('')
-                    required_cols = {'advertiser_id', 'creative_id', 'tracker_type', 'tracker_url'}
-                    if not required_cols.issubset(df.columns):
-                        st.error(f"CSV is missing required columns. It must contain: {', '.join(required_cols)}")
-                    else:
-                        st.success("CSV loaded successfully. Starting updates...")
-                        service = build('displayvideo', 'v3', credentials=credentials)
-                        grouped = df.groupby(['advertiser_id', 'creative_id'])
-                        
-                        results = []
-                        progress_bar = st.progress
+                df = pd.read_csv(uploaded_file, dtype=str).fillna('')
+                required_cols = {'advertiser_id', 'creative_id', 'tracker_type', 'tracker_url'}
+                if not required_cols.issubset(df.columns):
+                    st.error(f"CSV is missing required columns. It must contain: {', '.join(required_cols)}")
+                else:
+                    st.success("CSV loaded successfully. Starting updates...")
+                    service = build('displayvideo', 'v3', credentials=credentials)
+                    grouped = df.groupby(['advertiser_id', 'creative_id'])
+                    
+                    results = []
+                    progress_bar = st.progress(0)
+                    total_creatives = len(grouped)
+
+                    for i, (ids, group) in enumerate(grouped):
+                        adv_id, creative_id = ids
+                        # This 'try' block was missing its 'except' block. It is now fixed.
+                        try:
+                            with st.status(f"Processing Creative ID: {creative_id}", expanded=False) as status:
+                                try:
+                                    third_party_urls = []
+                                    for _, row in group.iterrows():
+                                        tracker_name = row['tracker_type']
+                                        if tracker_name in TRACKER_TYPE_MAP:
+                                            tracker_num = TRACKER_TYPE_MAP[tracker_name]
+                                            urls_string = row['tracker_url']
+                                            individual_urls = [url.strip() for url in urls_string.split(',') if url.strip()]
+                                            for url in individual_urls:
+                                                third_party_urls.append({
+                                                    "type": tracker_num,
+                                                    "url": url
+                                                })
+                                        else:
+                                            st.warning(f"Skipping unknown tracker type '{tracker_name}'")
+                                    
+                                    patch_body = {"thirdPartyUrls": third_party_urls}
+                                    request = service.advertisers().creatives().patch(
+                                        advertiserId=adv_id, creativeId=creative_id,
+                                        updateMask="thirdPartyUrls", body=patch_body)
+                                    request.execute()
+                                    
+                                    st.write("✅ Update successful.")
+                                    results.append({'Creative ID': creative_id, 'Status': 'Success', 'Details': ''})
+                                    status.update(label=f"✅ Creative ID: {creative_id} updated successfully.", state="complete")
+
+                                except Exception as e:
+                                    st.write(f"❌ Update failed: {e}")
+                                    results.append({'Creative ID': creative_id, 'Status': 'Failed', 'Details': str(e)})
+                                    status.update(label=f"❌ Creative ID: {creative_id} failed.", state="error")
+                        except Exception as e:
+                             st.error(f"A critical error occurred processing creative {creative_id}: {e}")
+                             results.append({'Creative ID': creative_id, 'Status': 'Critical Failure', 'Details': str(e)})
+
+                        progress_bar.progress((i + 1) / total_creatives)
+                    
+                    st.header("Bulk Update Results")
+                    st.dataframe(pd.DataFrame(results), use_container_width=True)
+            else:
+                st.error("Please upload a CSV file first.")
+
+---
+### ## How to Update
+
+1.  Go to your GitHub repository.
+2.  Edit the `app.py` file, replacing the old code with the new version above.
+3.  Commit the changes.
+
+The app will restart automatically with the syntax error corrected.
