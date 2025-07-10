@@ -30,9 +30,10 @@ def get_creds():
         return creds
 
     try:
-        # THIS IS THE CORRECTED PART - We now specify st.secrets['installed']
+        # THIS IS THE CORRECTED PART - We are now passing the whole st.secrets object
+        client_config = st.secrets
         flow = InstalledAppFlow.from_client_config(
-            st.secrets['installed'], 
+            client_config, 
             SCOPES,
             redirect_uri='urn:ietf:wg:oauth:2.0:oob'
         )
