@@ -21,24 +21,27 @@ SCOPES = ['https://www.googleapis.com/auth/display-video']
 
 # Function to get credentials
 def get_creds():
-    # Try to load credentials from the session state (avoids re-authenticating)
     if 'creds' in st.session_state and st.session_state.creds.valid:
         return st.session_state.creds
-        
-    # If token exists, load it
+    
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         st.session_state.creds = creds
         return creds
         
-    # If no valid credentials, start the auth flow
-    # THIS IS THE LINE I ADDED TO FIX THE ERROR
-    flow = InstalledAppFlow.from_client_secrets_file(
-        'client_secret.json', 
-        SCOPES,
-        redirect_uri='urn:ietf:wg:oauth:2.0:oob'
-    )
-    
+    # THIS IS THE UPDATED PART - IT NOW USES STREAMLIT SECRETS
+    try:
+        # Pass the secrets dictionary directly to the flow
+        client_config = st.secrets
+        flow = InstalledAppFlow.from_client_config(
+            client_config, 
+            SCOPES,
+            redirect_uri='urn:ietf:wg:oauth:2.0:oob'
+        )
+    except Exception as e:
+        st.error(f"Failed to load secrets. Make sure you have configured st.secrets correctly. Error: {e}")
+        return None
+
     auth_url, _ = flow.authorization_url(prompt='consent')
     st.warning("Please authorize this application by visiting the URL below:")
     st.code(auth_url)
@@ -49,7 +52,6 @@ def get_creds():
         try:
             flow.fetch_token(code=auth_code)
             creds = flow.credentials
-            # Save credentials for next time
             with open('token.json', 'w') as token:
                 token.write(creds.to_json())
             st.session_state.creds = creds
@@ -63,7 +65,6 @@ def get_creds():
 # --- Main App ---
 credentials = get_creds()
 
-# Only show the main form if the user is authenticated
 if credentials:
     st.header("Creative Details")
     
@@ -79,9 +80,8 @@ if credentials:
                 try:
                     service = build('displayvideo', 'v3', credentials=credentials)
                     
-                    # Process tracker URLs
                     urls = [url.strip() for url in trackers_str.strip().split('\n') if url.strip()]
-                    third_party_urls = [{"type": "CREATIVE_TRACKING_URL_TYPE_IMPRESSION", "url": url} for url in urls]
+                    third_party_urls = [{"type": 1, "url": url} for url in urls] # Using number 1 for impression tracker
 
                     patch_body = {"thirdPartyUrls": third_party_urls}
                     
