@@ -18,23 +18,11 @@ st.set_page_config(
 st.title("DV360 Creative Updater")
 
 # --- Data & Mappings ---
-# Mapping of user-friendly names to the API's required numbers
 TRACKER_TYPE_MAP = {
-    "Impression": 1,
-    "Click tracking": 14,
-    "Start": 2,
-    "First quartile": 3,
-    "Midpoint": 4,
-    "Third quartile": 5,
-    "Complete": 6,
-    "Mute": 7,
-    "Pause": 8,
-    "Rewind": 9,
-    "Fullscreen": 10,
-    "Stop": 11,
-    "Custom": 12,
-    "Skip": 13,
-    "Progress": 15
+    "Impression": 1, "Click tracking": 14, "Start": 2, "First quartile": 3,
+    "Midpoint": 4, "Third quartile": 5, "Complete": 6, "Mute": 7,
+    "Pause": 8, "Rewind": 9, "Fullscreen": 10, "Stop": 11,
+    "Custom": 12, "Skip": 13, "Progress": 15
 }
 REVERSE_TRACKER_TYPE_MAP = {v: k for k, v in TRACKER_TYPE_MAP.items()}
 
@@ -43,7 +31,6 @@ REVERSE_TRACKER_TYPE_MAP = {v: k for k, v in TRACKER_TYPE_MAP.items()}
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
 def get_creds():
-    # Function to get credentials, handles authentication flow
     if 'creds' in st.session_state and st.session_state.creds.valid:
         return st.session_state.creds
     if os.path.exists('token.json'):
@@ -79,7 +66,6 @@ def get_creds():
 credentials = get_creds()
 
 if credentials:
-    # Use tabs for different functionalities
     single_tab, bulk_tab = st.tabs(["Single Creative Update", "Bulk Update via CSV"])
 
     # --- SINGLE CREATIVE UPDATE TAB ---
@@ -92,8 +78,6 @@ if credentials:
             creative_id_single = st.text_input("Creative ID", key="creative_single")
 
         st.header("2. Add Trackers to Your List")
-        
-        # Initialize session state for staged trackers
         if 'staged_trackers' not in st.session_state:
             st.session_state.staged_trackers = []
 
@@ -112,7 +96,7 @@ if credentials:
         st.subheader("Trackers Ready for Update")
         if st.session_state.staged_trackers:
             df_staged = pd.DataFrame(st.session_state.staged_trackers)
-            df_staged['type'] = df_staged['type'].map(REVERSE_TRACKER_TYPE_MAP) # Show friendly name
+            df_staged['type'] = df_staged['type'].map(REVERSE_TRACKER_TYPE_MAP)
             st.dataframe(df_staged, use_container_width=True)
         else:
             st.info("No trackers have been added yet.")
@@ -133,7 +117,7 @@ if credentials:
                                 updateMask="thirdPartyUrls", body=patch_body)
                             response = request.execute()
                             st.success("✅ Creative updated successfully!")
-                            st.session_state.staged_trackers = [] # Clear list after update
+                            st.session_state.staged_trackers = []
                         except Exception as e:
                             st.error(f"An error occurred: {e}")
         with col7:
@@ -147,14 +131,14 @@ if credentials:
         st.info(
             "Your CSV must have these exact column headers: `advertiser_id`, `creative_id`, `tracker_type`, `tracker_url`"
         )
-        st.write("For `tracker_type`, use the official name (e.g., Impression, Start, Complete).")
+        st.write("For `tracker_type`, use the official name (e.g., Impression, Start, Complete). Separate multiple URLs in the `tracker_url` cell with a comma.")
 
         uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
         
         if st.button("Process Bulk Update", type="primary"):
             if uploaded_file is not None:
                 try:
-                    df = pd.read_csv(uploaded_file)
+                    df = pd.read_csv(uploaded_file, dtype=str).fillna('')
                     required_cols = {'advertiser_id', 'creative_id', 'tracker_type', 'tracker_url'}
                     if not required_cols.issubset(df.columns):
                         st.error(f"CSV is missing required columns. It must contain: {', '.join(required_cols)}")
@@ -164,45 +148,4 @@ if credentials:
                         grouped = df.groupby(['advertiser_id', 'creative_id'])
                         
                         results = []
-                        progress_bar = st.progress(0)
-                        total_creatives = len(grouped)
-
-                        for i, (ids, group) in enumerate(grouped):
-                            adv_id, creative_id = ids
-                            with st.status(f"Processing Creative ID: {creative_id}", expanded=True) as status:
-                                try:
-                                    third_party_urls = []
-                                    for _, row in group.iterrows():
-                                        tracker_name = row['tracker_type']
-                                        if tracker_name in TRACKER_TYPE_MAP:
-                                            third_party_urls.append({
-                                                "type": TRACKER_TYPE_MAP[tracker_name],
-                                                "url": row['tracker_url']
-                                            })
-                                        else:
-                                            st.warning(f"Skipping unknown tracker type '{tracker_name}'")
-                                    
-                                    patch_body = {"thirdPartyUrls": third_party_urls}
-                                    request = service.advertisers().creatives().patch(
-                                        advertiserId=adv_id, creativeId=creative_id,
-                                        updateMask="thirdPartyUrls", body=patch_body)
-                                    request.execute()
-                                    
-                                    st.write("✅ Update successful.")
-                                    results.append({'Creative ID': creative_id, 'Status': 'Success', 'Details': ''})
-                                    status.update(label=f"✅ Creative ID: {creative_id} updated successfully.", state="complete")
-
-                                except Exception as e:
-                                    st.write(f"❌ Update failed: {e}")
-                                    results.append({'Creative ID': creative_id, 'Status': 'Failed', 'Details': str(e)})
-                                    status.update(label=f"❌ Creative ID: {creative_id} failed.", state="error")
-                            
-                            progress_bar.progress((i + 1) / total_creatives)
-                        
-                        st.header("Bulk Update Results")
-                        st.dataframe(pd.DataFrame(results), use_container_width=True)
-
-                except Exception as e:
-                    st.error(f"An error occurred while processing the file: {e}")
-            else:
-                st.error("Please upload a CSV file first.")
+                        progress_bar = st.progress
