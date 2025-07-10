@@ -81,7 +81,7 @@ if credentials:
                     
                     # Process tracker URLs
                     urls = [url.strip() for url in trackers_str.strip().split('\n') if url.strip()]
-                    third_party_urls = [{"type": "IMPRESSION", "url": url} for url in urls]
+                    third_party_urls = [{"type": "CREATIVE_TRACKING_URL_TYPE_IMPRESSION", "url": url} for url in urls]
 
                     patch_body = {"thirdPartyUrls": third_party_urls}
                     
