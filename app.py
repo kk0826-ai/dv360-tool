@@ -28,7 +28,6 @@ REVERSE_TRACKER_TYPE_MAP = {v: k for k, v in TRACKER_TYPE_MAP.items()}
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
 # --- Session State Initialization ---
-# Explicitly initializing all keys makes the app more robust.
 if "staged_trackers" not in st.session_state:
     st.session_state.staged_trackers = []
 if "adv_single" not in st.session_state:
@@ -41,7 +40,6 @@ if "tracker_type_single" not in st.session_state:
     st.session_state.tracker_type_single = "Impression"
 
 # --- Callback Functions ---
-# Callback for the "Add to List" button
 def add_trackers():
     urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
     tracker_num = TRACKER_TYPE_MAP[st.session_state.tracker_type_single]
@@ -49,25 +47,37 @@ def add_trackers():
         st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
     st.session_state.urls_single = ""
 
-# Callback for the "Update Creative" button
 def update_creative():
     if not all([st.session_state.adv_single, st.session_state.creative_single, st.session_state.staged_trackers]):
         st.error("Please provide Advertiser ID, Creative ID, and add at least one tracker.")
-        return # Stop execution if validation fails
+        return
 
     try:
-        with st.spinner("Updating creative..."):
+        with st.spinner("Fetching existing trackers and updating creative..."):
             service = build('displayvideo', 'v3', credentials=st.session_state.creds)
-            patch_body = {"thirdPartyUrls": st.session_state.staged_trackers}
-            request = service.advertisers().creatives().patch(
+
+            # 1. FETCH the existing creative data
+            get_request = service.advertisers().creatives().get(
+                advertiserId=st.session_state.adv_single,
+                creativeId=st.session_state.creative_single
+            )
+            creative_data = get_request.execute()
+            existing_trackers = creative_data.get('thirdPartyUrls', [])
+
+            # 2. MODIFY the list by combining existing and new trackers
+            combined_trackers = existing_trackers + st.session_state.staged_trackers
+            
+            # 3. PATCH the creative with the full, combined list
+            patch_body = {"thirdPartyUrls": combined_trackers}
+            patch_request = service.advertisers().creatives().patch(
                 advertiserId=st.session_state.adv_single,
                 creativeId=st.session_state.creative_single,
                 updateMask="thirdPartyUrls",
                 body=patch_body
             )
-            request.execute()
+            patch_request.execute()
+
         st.success("✅ Creative updated successfully!")
-        # It's safe to modify state inside a callback
         st.session_state.staged_trackers = []
         st.session_state.adv_single = ""
         st.session_state.creative_single = ""
@@ -76,7 +86,6 @@ def update_creative():
 
 # --- Main App Logic ---
 def get_creds():
-    # ... (Authentication logic remains the same) ...
     if 'creds' in st.session_state and st.session_state.creds.valid:
         return st.session_state.creds
     if os.path.exists('token.json'):
@@ -146,7 +155,6 @@ if st.session_state.creds:
         st.header("3. Update Creative")
         col6, col7 = st.columns([1, 3])
         with col6:
-            # The button now calls the update_creative callback
             st.button("Update Creative", type="primary", use_container_width=True, on_click=update_creative)
         with col7:
             if st.button("Clear List", use_container_width=True):
@@ -154,7 +162,6 @@ if st.session_state.creds:
                 st.rerun()
 
     with bulk_tab:
-        # The Bulk Update tab logic remains unchanged as it was already correct.
         st.header("Upload CSV for Bulk Updates")
         st.info(
             "Your CSV must have these exact column headers: `advertiser_id`, `creative_id`, `tracker_type`, `tracker_url`"
@@ -184,6 +191,7 @@ if st.session_state.creds:
                             try:
                                 with st.status(f"Processing Creative ID: {creative_id}", expanded=False) as status:
                                     try:
+                                        # In bulk mode, we assume full replacement is intended per the CSV group.
                                         third_party_urls = []
                                         for _, row in group.iterrows():
                                             tracker_name = row['tracker_type']
