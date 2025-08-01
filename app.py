@@ -24,12 +24,13 @@ for k, v in {
     "adv_single": "",
     "creative_single": "",
     "urls_single": "",
-    "tracker_type_single": "Impression"
+    "tracker_type_single": "Impression",
+    "existing_trackers": []
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# --- Auth ---
+# --- Authentication ---
 def get_creds():
     if 'creds' in st.session_state and st.session_state.creds and st.session_state.creds.valid:
         return st.session_state.creds
@@ -69,33 +70,68 @@ def get_creds():
 
 st.session_state.creds = get_creds()
 
-# --- Merge Logic ---
+# --- Merge trackers preserving keys except replacing URL ---
 def merge_trackers(existing, staged):
-    staged_by_type = {}
+    staged_map = {}
     for t in staged:
-        staged_by_type.setdefault(t["type"], []).append(t)
-    filtered_existing = [t for t in existing if t["type"] not in staged_by_type]
-    final = filtered_existing + [t for group in staged_by_type.values() for t in group]
+        staged_map.setdefault(t["type"], []).append(t)
+
+    final = []
+    processed_types = set()
+
+    for tracker in existing:
+        ttype = tracker['type']
+        if ttype in staged_map:
+            # Replace URL only, keep other keys intact
+            for new_tracker in staged_map[ttype]:
+                new_tracker_full = tracker.copy()
+                new_tracker_full['url'] = new_tracker['url']
+                final.append(new_tracker_full)
+            processed_types.add(ttype)
+        else:
+            final.append(tracker)
+
+    # Add completely new types that don't exist yet
+    for ttype, trackers in staged_map.items():
+        if ttype not in processed_types:
+            final.extend(trackers)
+
     return final
 
-# --- Add Trackers ---
+# --- Add trackers to staged list ---
 def add_trackers():
     urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
-    tracker_label = st.session_state.tracker_type_single  # What user selected in dropdown
+    tracker_label = st.session_state.tracker_type_single
     tracker_num = TRACKER_TYPE_MAP[tracker_label]
 
     for url in urls:
         st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
     st.session_state.urls_single = ""
 
-    # Debug output
     st.write("🧪 You just added:", [{"type": tracker_num, "label": tracker_label, "url": url} for url in urls])
     st.write("🧪 All staged trackers so far:", st.session_state.staged_trackers)
 
-# --- Update Creative ---
+# --- Load existing trackers from DV360 API ---
+def load_existing_trackers():
+    if not (st.session_state.adv_single and st.session_state.creative_single):
+        st.error("Enter Advertiser ID and Creative ID first.")
+        return
+    try:
+        service = build('displayvideo', 'v3', credentials=st.session_state.creds)
+        creative = service.advertisers().creatives().get(
+            advertiserId=st.session_state.adv_single,
+            creativeId=st.session_state.creative_single
+        ).execute()
+        st.session_state.existing_trackers = creative.get('thirdPartyUrls', [])
+        st.success(f"Loaded {len(st.session_state.existing_trackers)} existing trackers.")
+        st.write("Existing trackers from API:", st.session_state.existing_trackers)
+    except Exception as e:
+        st.error(f"Failed to fetch existing trackers: {e}")
+
+# --- Update creative with merged trackers ---
 def update_creative():
     if not (st.session_state.adv_single and st.session_state.creative_single and st.session_state.staged_trackers):
-        st.error("Advertiser ID, Creative ID, and at least one tracker required.")
+        st.error("Advertiser ID, Creative ID, and at least one tracker are required.")
         return
 
     try:
@@ -107,13 +143,10 @@ def update_creative():
 
         merged = merge_trackers(creative.get("thirdPartyUrls", []), st.session_state.staged_trackers)
 
-        # Sort merged trackers by type to keep order consistent
-        try:
-            merged.sort(key=lambda x: x['type'])
-        except Exception as e:
-            st.warning(f"Warning: Could not sort merged trackers: {e}")
+        # Optional: sort for consistent ordering
+        merged.sort(key=lambda x: x['type'])
 
-        st.write("🔎 Final payload being sent:", merged)  # Debug final payload
+        st.write("🔎 Final payload being sent:", merged)
 
         service.advertisers().creatives().patch(
             advertiserId=st.session_state.adv_single,
@@ -129,7 +162,7 @@ def update_creative():
     except Exception as e:
         st.error(f"Error updating creative: {e}")
 
-# --- Main UI ---
+# --- UI ---
 if st.session_state.creds:
     single_tab, bulk_tab = st.tabs(["Single Creative Update", "Bulk Update via CSV"])
 
@@ -139,11 +172,13 @@ if st.session_state.creds:
         col1.text_input("Advertiser ID", key="adv_single")
         col2.text_input("Creative ID", key="creative_single")
 
+        if st.button("Load Existing Trackers"):
+            load_existing_trackers()
+
         st.header("2. Add Third-Party Trackers")
         c1, c2, c3 = st.columns([2, 3, 1])
-        # key fixed here
         c1.selectbox("Select Tracker Type", TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
-        c2.text_area("Tracker URLs (1 per line)", key="urls_single")
+        c2.text_area("Tracker URLs (one per line)", key="urls_single")
         c3.button("Add to List", on_click=add_trackers, disabled=not st.session_state.urls_single)
 
         if st.session_state.staged_trackers:
