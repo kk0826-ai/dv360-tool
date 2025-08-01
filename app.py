@@ -106,6 +106,8 @@ def update_creative():
         ).execute()
 
         merged = merge_trackers(creative.get("thirdPartyUrls", []), st.session_state.staged_trackers)
+# ✅ Sort for stability (optional but good practice)
+merged.sort(key=lambda x: x['type'])
 
         service.advertisers().creatives().patch(
             advertiserId=st.session_state.adv_single,
