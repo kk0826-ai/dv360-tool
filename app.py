@@ -56,7 +56,6 @@ def update_creative():
         with st.spinner("Fetching, merging, and updating trackers..."):
             service = build('displayvideo', 'v3', credentials=st.session_state.creds)
 
-            # 1. FETCH the existing creative data
             get_request = service.advertisers().creatives().get(
                 advertiserId=st.session_state.adv_single,
                 creativeId=st.session_state.creative_single
@@ -64,18 +63,13 @@ def update_creative():
             creative_data = get_request.execute()
             existing_trackers = creative_data.get('thirdPartyUrls', [])
 
-            # 2. MODIFY using an intelligent merge to handle both updates and additions
-            # Use a dictionary for an efficient merge (key = tracker type).
             merged_trackers_map = {tracker['type']: tracker for tracker in existing_trackers}
 
-            # Add/overwrite with the new trackers staged in the UI.
             for new_tracker in st.session_state.staged_trackers:
                 merged_trackers_map[new_tracker['type']] = new_tracker
 
-            # Convert the dictionary values back to the final list for the API.
             final_trackers = list(merged_trackers_map.values())
             
-            # 3. PATCH the creative with the final, merged list
             patch_body = {"thirdPartyUrls": final_trackers}
             patch_request = service.advertisers().creatives().patch(
                 advertiserId=st.session_state.adv_single,
@@ -94,12 +88,19 @@ def update_creative():
 
 # --- Main App Logic ---
 def get_creds():
-    if 'creds' in st.session_state and st.session_state.creds.valid:
+    # This check is now more robust to handle the None case during login
+    if 'creds' in st.session_state and st.session_state.creds and st.session_state.creds.valid:
         return st.session_state.creds
+    
     if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        st.session_state.creds = creds
-        return creds
+        try:
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+            if creds and creds.valid:
+                 st.session_state.creds = creds
+                 return creds
+        except Exception as e:
+            st.warning(f"Could not load token.json: {e}. Please re-authenticate.")
+
     try:
         client_config = st.secrets
         flow = InstalledAppFlow.from_client_config(
@@ -199,7 +200,6 @@ if st.session_state.creds:
                             try:
                                 with st.status(f"Processing Creative ID: {creative_id}", expanded=False) as status:
                                     try:
-                                        # In bulk mode, we assume full replacement is intended per the CSV group.
                                         third_party_urls = []
                                         for _, row in group.iterrows():
                                             tracker_name = row['tracker_type']
