@@ -204,4 +204,4 @@ if st.session_state.creds:
                         st.subheader("Results")
                         st.dataframe(pd.DataFrame(results), use_container_width=True)
                 except Exception as e:
-                    st.error(f"Error processing CSV: {e
+                    st.error(f"Error processing CSV: {e}")
