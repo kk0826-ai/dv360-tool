@@ -68,25 +68,37 @@ if credentials:
         st.header("1. Enter Creative Details")
         col1, col2 = st.columns(2)
         with col1:
-            adv_id_single = st.text_input("Advertiser ID", key="adv_single")
+            # This widget's state is now available as st.session_state.adv_single
+            st.text_input("Advertiser ID", key="adv_single")
         with col2:
-            creative_id_single = st.text_input("Creative ID", key="creative_single")
+            # This widget's state is now available as st.session_state.creative_single
+            st.text_input("Creative ID", key="creative_single")
 
         st.header("2. Add Trackers to Your List")
+        # Initialize session state for the list of trackers
         if 'staged_trackers' not in st.session_state:
             st.session_state.staged_trackers = []
 
-        col3, col4, col5 = st.columns([2,3,1])
+        col3, col4, col5 = st.columns([2, 3, 1])
         with col3:
-            tracker_type_single = st.selectbox("Select Tracker Type", options=TRACKER_TYPE_MAP.keys())
+            # Use a key to preserve the selected tracker type
+            st.selectbox("Select Tracker Type", options=TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
         with col4:
-            urls_single = st.text_area("Enter URLs (one per line)")
+            # Use a key to preserve the URLs entered in the text area
+            st.text_area("Enter URLs (one per line)", key="urls_single", help="Enter one URL per line.")
         with col5:
             if st.button("Add to List", use_container_width=True):
-                urls = [url.strip() for url in urls_single.strip().split('\n') if url.strip()]
-                tracker_num = TRACKER_TYPE_MAP[tracker_type_single]
-                for url in urls:
-                    st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
+                # Read URLs and tracker type directly from session_state
+                if st.session_state.urls_single:
+                    urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
+                    tracker_num = TRACKER_TYPE_MAP[st.session_state.tracker_type_single]
+                    for url in urls:
+                        st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
+                    # Clear the text area for the next entry
+                    st.session_state.urls_single = ""
+                    st.rerun() # Rerun to show the updated list and cleared text area
+                else:
+                    st.warning("Please enter at least one URL.")
         
         st.subheader("Trackers Ready for Update")
         if st.session_state.staged_trackers:
@@ -97,22 +109,30 @@ if credentials:
             st.info("No trackers have been added yet.")
 
         st.header("3. Update Creative")
-        col6, col7 = st.columns([1,3])
+        col6, col7 = st.columns([1, 3])
         with col6:
             if st.button("Update Creative", type="primary", use_container_width=True):
-                if not all([adv_id_single, creative_id_single, st.session_state.staged_trackers]):
-                    st.error("Please provide IDs and add at least one tracker.")
+                # Read IDs directly from session_state
+                if not all([st.session_state.adv_single, st.session_state.creative_single, st.session_state.staged_trackers]):
+                    st.error("Please provide Advertiser ID, Creative ID, and add at least one tracker.")
                 else:
                     with st.spinner("Updating creative..."):
                         try:
                             service = build('displayvideo', 'v3', credentials=credentials)
                             patch_body = {"thirdPartyUrls": st.session_state.staged_trackers}
                             request = service.advertisers().creatives().patch(
-                                advertiserId=adv_id_single, creativeId=creative_id_single,
-                                updateMask="thirdPartyUrls", body=patch_body)
+                                advertiserId=st.session_state.adv_single, 
+                                creativeId=st.session_state.creative_single,
+                                updateMask="thirdPartyUrls", 
+                                body=patch_body
+                            )
                             response = request.execute()
                             st.success("✅ Creative updated successfully!")
+                            # Clear the list and IDs after a successful update
                             st.session_state.staged_trackers = []
+                            st.session_state.adv_single = ""
+                            st.session_state.creative_single = ""
+                            st.rerun()
                         except Exception as e:
                             st.error(f"An error occurred: {e}")
         with col7:
@@ -180,8 +200,8 @@ if credentials:
                                         results.append({'Creative ID': creative_id, 'Status': 'Failed', 'Details': str(e)})
                                         status.update(label=f"❌ Creative ID: {creative_id} failed.", state="error")
                             except Exception as e:
-                                 st.error(f"A critical error occurred processing creative {creative_id}: {e}")
-                                 results.append({'Creative ID': creative_id, 'Status': 'Critical Failure', 'Details': str(e)})
+                                st.error(f"A critical error occurred processing creative {creative_id}: {e}")
+                                results.append({'Creative ID': creative_id, 'Status': 'Critical Failure', 'Details': str(e)})
 
                             progress_bar.progress((i + 1) / total_creatives)
                         
