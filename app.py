@@ -88,7 +88,7 @@ def add_trackers():
         st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
     st.session_state.urls_single = ""
 
-    # ✅ DEBUG: Log what's actually being added
+    # Debug output
     st.write("🧪 You just added:", [{"type": tracker_num, "label": tracker_label, "url": url} for url in urls])
     st.write("🧪 All staged trackers so far:", st.session_state.staged_trackers)
 
@@ -106,8 +106,14 @@ def update_creative():
         ).execute()
 
         merged = merge_trackers(creative.get("thirdPartyUrls", []), st.session_state.staged_trackers)
-# ✅ Sort for stability (optional but good practice)
-merged.sort(key=lambda x: x['type'])
+
+        # Sort merged trackers by type to keep order consistent
+        try:
+            merged.sort(key=lambda x: x['type'])
+        except Exception as e:
+            st.warning(f"Warning: Could not sort merged trackers: {e}")
+
+        st.write("🔎 Final payload being sent:", merged)  # Debug final payload
 
         service.advertisers().creatives().patch(
             advertiserId=st.session_state.adv_single,
@@ -135,7 +141,7 @@ if st.session_state.creds:
 
         st.header("2. Add Third-Party Trackers")
         c1, c2, c3 = st.columns([2, 3, 1])
-        # ✅ Fix applied here: key="tracker_type_single"
+        # key fixed here
         c1.selectbox("Select Tracker Type", TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
         c2.text_area("Tracker URLs (1 per line)", key="urls_single")
         c3.button("Add to List", on_click=add_trackers, disabled=not st.session_state.urls_single)
