@@ -78,21 +78,19 @@ def add_trackers():
         st.session_state.staged_trackers.append({"type": tracker_type, "url": url})
     st.session_state.urls_single = ""
 
-# --- Merge helper ---
+# --- Final Correct Merge Function ---
 def merge_trackers(existing, staged):
-    staged_map = {t["type"]: t for t in staged}
-    final = []
-    handled = set()
+    # Group new trackers by type
+    staged_by_type = {}
+    for t in staged:
+        staged_by_type.setdefault(t["type"], []).append(t)
 
-    for t in existing:
-        if t["type"] in staged_map:
-            final.append(staged_map[t["type"]])  # Replace
-            handled.add(t["type"])
-        else:
-            final.append(t)  # Keep
-    for t_type, t in staged_map.items():
-        if t_type not in handled:
-            final.append(t)  # Add new
+    # Remove existing trackers of any staged type
+    types_to_replace = set(staged_by_type.keys())
+    preserved = [t for t in existing if t["type"] not in types_to_replace]
+
+    # Add new trackers
+    final = preserved + [t for group in staged_by_type.values() for t in group]
     return final
 
 # --- Update creative ---
