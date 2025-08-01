@@ -27,6 +27,17 @@ REVERSE_TRACKER_TYPE_MAP = {v: k for k, v in TRACKER_TYPE_MAP.items()}
 
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
+# --- New Callback Function ---
+# This function handles the logic for the "Add to List" button.
+# It runs safely before the page is redrawn.
+def add_trackers():
+    urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
+    tracker_num = TRACKER_TYPE_MAP[st.session_state.tracker_type_single]
+    for url in urls:
+        st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
+    # This is now safe to do inside a callback
+    st.session_state.urls_single = ""
+
 def get_creds():
     if 'creds' in st.session_state and st.session_state.creds.valid:
         return st.session_state.creds
@@ -68,38 +79,30 @@ if credentials:
         st.header("1. Enter Creative Details")
         col1, col2 = st.columns(2)
         with col1:
-            # This widget's state is now available as st.session_state.adv_single
             st.text_input("Advertiser ID", key="adv_single")
         with col2:
-            # This widget's state is now available as st.session_state.creative_single
             st.text_input("Creative ID", key="creative_single")
 
         st.header("2. Add Trackers to Your List")
-        # Initialize session state for the list of trackers
         if 'staged_trackers' not in st.session_state:
             st.session_state.staged_trackers = []
 
         col3, col4, col5 = st.columns([2, 3, 1])
         with col3:
-            # Use a key to preserve the selected tracker type
             st.selectbox("Select Tracker Type", options=TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
         with col4:
-            # Use a key to preserve the URLs entered in the text area
             st.text_area("Enter URLs (one per line)", key="urls_single", help="Enter one URL per line.")
         with col5:
-            if st.button("Add to List", use_container_width=True):
-                # Read URLs and tracker type directly from session_state
-                if st.session_state.urls_single:
-                    urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
-                    tracker_num = TRACKER_TYPE_MAP[st.session_state.tracker_type_single]
-                    for url in urls:
-                        st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
-                    # Clear the text area for the next entry
-                    st.session_state.urls_single = ""
-                    st.rerun() # Rerun to show the updated list and cleared text area
-                else:
-                    st.warning("Please enter at least one URL.")
-        
+            # --- MODIFIED BUTTON ---
+            # Use on_click to call the callback function.
+            # Use disabled to prevent clicks when the input is empty.
+            st.button(
+                "Add to List",
+                use_container_width=True,
+                on_click=add_trackers,
+                disabled=(not st.session_state.get("urls_single", ""))
+            )
+
         st.subheader("Trackers Ready for Update")
         if st.session_state.staged_trackers:
             df_staged = pd.DataFrame(st.session_state.staged_trackers)
@@ -112,7 +115,6 @@ if credentials:
         col6, col7 = st.columns([1, 3])
         with col6:
             if st.button("Update Creative", type="primary", use_container_width=True):
-                # Read IDs directly from session_state
                 if not all([st.session_state.adv_single, st.session_state.creative_single, st.session_state.staged_trackers]):
                     st.error("Please provide Advertiser ID, Creative ID, and add at least one tracker.")
                 else:
@@ -121,14 +123,13 @@ if credentials:
                             service = build('displayvideo', 'v3', credentials=credentials)
                             patch_body = {"thirdPartyUrls": st.session_state.staged_trackers}
                             request = service.advertisers().creatives().patch(
-                                advertiserId=st.session_state.adv_single, 
+                                advertiserId=st.session_state.adv_single,
                                 creativeId=st.session_state.creative_single,
-                                updateMask="thirdPartyUrls", 
+                                updateMask="thirdPartyUrls",
                                 body=patch_body
                             )
                             response = request.execute()
                             st.success("✅ Creative updated successfully!")
-                            # Clear the list and IDs after a successful update
                             st.session_state.staged_trackers = []
                             st.session_state.adv_single = ""
                             st.session_state.creative_single = ""
@@ -148,7 +149,7 @@ if credentials:
         st.write("For `tracker_type`, use the official name (e.g., Impression, Start, Complete). Separate multiple URLs in the `tracker_url` cell with a comma.")
 
         uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
-        
+
         if st.button("Process Bulk Update", type="primary"):
             if uploaded_file is not None:
                 try:
@@ -160,7 +161,7 @@ if credentials:
                         st.success("CSV loaded successfully. Starting updates...")
                         service = build('displayvideo', 'v3', credentials=credentials)
                         grouped = df.groupby(['advertiser_id', 'creative_id'])
-                        
+
                         results = []
                         progress_bar = st.progress(0)
                         total_creatives = len(grouped)
@@ -184,13 +185,13 @@ if credentials:
                                                     })
                                             else:
                                                 st.warning(f"Skipping unknown tracker type '{tracker_name}'")
-                                        
+
                                         patch_body = {"thirdPartyUrls": third_party_urls}
                                         request = service.advertisers().creatives().patch(
                                             advertiserId=adv_id, creativeId=creative_id,
                                             updateMask="thirdPartyUrls", body=patch_body)
                                         request.execute()
-                                        
+
                                         st.write("✅ Update successful.")
                                         results.append({'Creative ID': creative_id, 'Status': 'Success', 'Details': ''})
                                         status.update(label=f"✅ Creative ID: {creative_id} updated successfully.", state="complete")
@@ -204,7 +205,7 @@ if credentials:
                                 results.append({'Creative ID': creative_id, 'Status': 'Critical Failure', 'Details': str(e)})
 
                             progress_bar.progress((i + 1) / total_creatives)
-                        
+
                         st.header("Bulk Update Results")
                         st.dataframe(pd.DataFrame(results), use_container_width=True)
                 except Exception as e:
