@@ -19,14 +19,13 @@ REVERSE_TRACKER_TYPE_MAP = {v: k for k, v in TRACKER_TYPE_MAP.items()}
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
 # --- Session State Defaults ---
-default_keys = {
+for k, v in {
     "staged_trackers": [],
     "adv_single": "",
     "creative_single": "",
     "urls_single": "",
     "tracker_type_single": "Impression"
-}
-for k, v in default_keys.items():
+}.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -70,30 +69,25 @@ def get_creds():
 
 st.session_state.creds = get_creds()
 
-# --- Add tracker ---
-def add_trackers():
-    urls = [u.strip() for u in st.session_state.urls_single.strip().split('\n') if u.strip()]
-    tracker_type = TRACKER_TYPE_MAP[st.session_state.tracker_type_single]
-    for url in urls:
-        st.session_state.staged_trackers.append({"type": tracker_type, "url": url})
-    st.session_state.urls_single = ""
-
-# --- Final Correct Merge Function ---
+# --- Merge Logic ---
 def merge_trackers(existing, staged):
-    # Group new trackers by type
     staged_by_type = {}
     for t in staged:
         staged_by_type.setdefault(t["type"], []).append(t)
-
-    # Remove existing trackers of any staged type
-    types_to_replace = set(staged_by_type.keys())
-    preserved = [t for t in existing if t["type"] not in types_to_replace]
-
-    # Add new trackers
-    final = preserved + [t for group in staged_by_type.values() for t in group]
+    filtered_existing = [t for t in existing if t["type"] not in staged_by_type]
+    final = filtered_existing + [t for group in staged_by_type.values() for t in group]
     return final
 
-# --- Update creative ---
+# --- Add Trackers ---
+def add_trackers():
+    urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
+    tracker_label = st.session_state.tracker_type_single
+    tracker_num = TRACKER_TYPE_MAP[tracker_label]
+    for url in urls:
+        st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
+    st.session_state.urls_single = ""
+
+# --- Update Creative ---
 def update_creative():
     if not (st.session_state.adv_single and st.session_state.creative_single and st.session_state.staged_trackers):
         st.error("Advertiser ID, Creative ID, and at least one tracker required.")
@@ -122,11 +116,10 @@ def update_creative():
     except Exception as e:
         st.error(f"Error updating creative: {e}")
 
-# --- UI ---
+# --- Main UI ---
 if st.session_state.creds:
     single_tab, bulk_tab = st.tabs(["Single Creative Update", "Bulk Update via CSV"])
 
-    # --- SINGLE ---
     with single_tab:
         st.header("1. Enter Creative Info")
         col1, col2 = st.columns(2)
@@ -136,25 +129,24 @@ if st.session_state.creds:
         st.header("2. Add Third-Party Trackers")
         c1, c2, c3 = st.columns([2, 3, 1])
         c1.selectbox("Tracker Type", TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
-        c2.text_area("URLs (1 per line)", key="urls_single")
+        c2.text_area("Tracker URLs (1 per line)", key="urls_single")
         c3.button("Add to List", on_click=add_trackers, disabled=not st.session_state.urls_single)
 
         if st.session_state.staged_trackers:
-            st.subheader("Staged Trackers")
+            st.subheader("Trackers to Be Added")
             df = pd.DataFrame(st.session_state.staged_trackers)
-            df['type'] = df['type'].map(REVERSE_TRACKER_TYPE_MAP)
-            st.dataframe(df, use_container_width=True)
+            df["type_label"] = df["type"].map(REVERSE_TRACKER_TYPE_MAP)
+            st.dataframe(df[["type_label", "url"]], use_container_width=True)
         else:
             st.info("No trackers staged yet.")
 
         st.header("3. Update Creative")
-        c6, c7 = st.columns([1, 3])
-        c6.button("Update Creative", type="primary", on_click=update_creative)
-        if c7.button("Clear"):
+        col6, col7 = st.columns([1, 3])
+        col6.button("Update Creative", type="primary", on_click=update_creative)
+        if col7.button("Clear"):
             st.session_state.staged_trackers = []
             st.rerun()
 
-    # --- BULK ---
     with bulk_tab:
         st.header("Bulk CSV Upload")
         st.info("CSV must include: `advertiser_id`, `creative_id`, `tracker_type`, `tracker_url`")
@@ -184,13 +176,14 @@ if st.session_state.creds:
                                     
                                     staged = []
                                     for _, row in group.iterrows():
-                                        t_type = row['tracker_type'].strip()
-                                        if t_type not in TRACKER_TYPE_MAP:
-                                            st.warning(f"Unknown tracker type '{t_type}' in Creative ID {creative_id}")
+                                        tracker_type = row['tracker_type'].strip()
+                                        if tracker_type not in TRACKER_TYPE_MAP:
+                                            st.warning(f"Unknown tracker type '{tracker_type}' in Creative {creative_id}")
                                             continue
+                                        tracker_num = TRACKER_TYPE_MAP[tracker_type]
                                         urls = [u.strip() for u in row['tracker_url'].split(',') if u.strip()]
                                         for url in urls:
-                                            staged.append({"type": TRACKER_TYPE_MAP[t_type], "url": url})
+                                            staged.append({"type": tracker_num, "url": url})
 
                                     merged = merge_trackers(creative.get("thirdPartyUrls", []), staged)
 
@@ -211,4 +204,4 @@ if st.session_state.creds:
                         st.subheader("Results")
                         st.dataframe(pd.DataFrame(results), use_container_width=True)
                 except Exception as e:
-                    st.error(f"Error processing CSV: {e}")
+                    st.error(f"Error processing CSV: {e
