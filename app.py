@@ -65,18 +65,26 @@ def update_creative():
             existing_trackers = creative_data.get('thirdPartyUrls', [])
             staged_trackers = st.session_state.staged_trackers
 
-            # 2. PERFORM a robust list-based merge
-            # Get the set of all tracker types the user wants to add or update.
-            types_to_update = {tracker['type'] for tracker in staged_trackers}
+            # 2. PERFORM a robust, order-preserving merge
+            staged_map = {tracker['type']: tracker for tracker in staged_trackers}
+            final_trackers = []
+            processed_types = set()
 
-            # Start the final list with only the old trackers that are NOT being updated.
-            final_trackers = [
-                tracker for tracker in existing_trackers
-                if tracker['type'] not in types_to_update
-            ]
+            # Iterate through existing trackers to update them in place and preserve order.
+            for existing_tracker in existing_trackers:
+                tracker_type = existing_tracker['type']
+                if tracker_type in staged_map:
+                    # This tracker is being updated. Use the new one from staging.
+                    final_trackers.append(staged_map[tracker_type])
+                else:
+                    # This tracker is not being updated. Keep the old one.
+                    final_trackers.append(existing_tracker)
+                processed_types.add(tracker_type)
 
-            # Now, add all the new and updated trackers from the staging list.
-            final_trackers.extend(staged_trackers)
+            # Add any brand new trackers that weren't in the original list.
+            for staged_tracker in staged_trackers:
+                if staged_tracker['type'] not in processed_types:
+                    final_trackers.append(staged_tracker)
             
             # 3. PATCH the creative with the final, merged list
             patch_body = {"thirdPartyUrls": final_trackers}
@@ -208,7 +216,7 @@ if st.session_state.creds:
                             try:
                                 with st.status(f"Processing Creative ID: {creative_id}", expanded=False) as status:
                                     try:
-                                        # In bulk mode, we assume full replacement is intended per the CSV group.
+                                        # NOTE: Bulk mode still performs a full replacement based on the CSV group.
                                         third_party_urls = []
                                         for _, row in group.iterrows():
                                             tracker_name = row['tracker_type']
