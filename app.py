@@ -17,6 +17,7 @@ st.set_page_config(
 
 st.title("DV360 Creative Updater")
 
+# --- Constants ---
 TRACKER_TYPE_MAP = {
     "Impression": 1, "Click tracking": 14, "Start": 2, "First quartile": 3,
     "Midpoint": 4, "Third quartile": 5, "Complete": 6, "Mute": 7,
@@ -24,21 +25,58 @@ TRACKER_TYPE_MAP = {
     "Custom": 12, "Skip": 13, "Progress": 15
 }
 REVERSE_TRACKER_TYPE_MAP = {v: k for k, v in TRACKER_TYPE_MAP.items()}
-
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
-# --- New Callback Function ---
-# This function handles the logic for the "Add to List" button.
-# It runs safely before the page is redrawn.
+# --- Session State Initialization ---
+# Explicitly initializing all keys makes the app more robust.
+if "staged_trackers" not in st.session_state:
+    st.session_state.staged_trackers = []
+if "adv_single" not in st.session_state:
+    st.session_state.adv_single = ""
+if "creative_single" not in st.session_state:
+    st.session_state.creative_single = ""
+if "urls_single" not in st.session_state:
+    st.session_state.urls_single = ""
+if "tracker_type_single" not in st.session_state:
+    st.session_state.tracker_type_single = "Impression"
+
+# --- Callback Functions ---
+# Callback for the "Add to List" button
 def add_trackers():
     urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
     tracker_num = TRACKER_TYPE_MAP[st.session_state.tracker_type_single]
     for url in urls:
         st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
-    # This is now safe to do inside a callback
     st.session_state.urls_single = ""
 
+# Callback for the "Update Creative" button
+def update_creative():
+    if not all([st.session_state.adv_single, st.session_state.creative_single, st.session_state.staged_trackers]):
+        st.error("Please provide Advertiser ID, Creative ID, and add at least one tracker.")
+        return # Stop execution if validation fails
+
+    try:
+        with st.spinner("Updating creative..."):
+            service = build('displayvideo', 'v3', credentials=st.session_state.creds)
+            patch_body = {"thirdPartyUrls": st.session_state.staged_trackers}
+            request = service.advertisers().creatives().patch(
+                advertiserId=st.session_state.adv_single,
+                creativeId=st.session_state.creative_single,
+                updateMask="thirdPartyUrls",
+                body=patch_body
+            )
+            request.execute()
+        st.success("✅ Creative updated successfully!")
+        # It's safe to modify state inside a callback
+        st.session_state.staged_trackers = []
+        st.session_state.adv_single = ""
+        st.session_state.creative_single = ""
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+
+# --- Main App Logic ---
 def get_creds():
+    # ... (Authentication logic remains the same) ...
     if 'creds' in st.session_state and st.session_state.creds.valid:
         return st.session_state.creds
     if os.path.exists('token.json'):
@@ -70,9 +108,9 @@ def get_creds():
             st.error(f"Error fetching token: {e}")
     return None
 
-credentials = get_creds()
+st.session_state.creds = get_creds()
 
-if credentials:
+if st.session_state.creds:
     single_tab, bulk_tab = st.tabs(["Single Creative Update", "Bulk Update via CSV"])
 
     with single_tab:
@@ -84,23 +122,17 @@ if credentials:
             st.text_input("Creative ID", key="creative_single")
 
         st.header("2. Add Trackers to Your List")
-        if 'staged_trackers' not in st.session_state:
-            st.session_state.staged_trackers = []
-
         col3, col4, col5 = st.columns([2, 3, 1])
         with col3:
             st.selectbox("Select Tracker Type", options=TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
         with col4:
             st.text_area("Enter URLs (one per line)", key="urls_single", help="Enter one URL per line.")
         with col5:
-            # --- MODIFIED BUTTON ---
-            # Use on_click to call the callback function.
-            # Use disabled to prevent clicks when the input is empty.
             st.button(
                 "Add to List",
                 use_container_width=True,
                 on_click=add_trackers,
-                disabled=(not st.session_state.get("urls_single", ""))
+                disabled=(not st.session_state.urls_single)
             )
 
         st.subheader("Trackers Ready for Update")
@@ -114,34 +146,15 @@ if credentials:
         st.header("3. Update Creative")
         col6, col7 = st.columns([1, 3])
         with col6:
-            if st.button("Update Creative", type="primary", use_container_width=True):
-                if not all([st.session_state.adv_single, st.session_state.creative_single, st.session_state.staged_trackers]):
-                    st.error("Please provide Advertiser ID, Creative ID, and add at least one tracker.")
-                else:
-                    with st.spinner("Updating creative..."):
-                        try:
-                            service = build('displayvideo', 'v3', credentials=credentials)
-                            patch_body = {"thirdPartyUrls": st.session_state.staged_trackers}
-                            request = service.advertisers().creatives().patch(
-                                advertiserId=st.session_state.adv_single,
-                                creativeId=st.session_state.creative_single,
-                                updateMask="thirdPartyUrls",
-                                body=patch_body
-                            )
-                            response = request.execute()
-                            st.success("✅ Creative updated successfully!")
-                            st.session_state.staged_trackers = []
-                            st.session_state.adv_single = ""
-                            st.session_state.creative_single = ""
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"An error occurred: {e}")
+            # The button now calls the update_creative callback
+            st.button("Update Creative", type="primary", use_container_width=True, on_click=update_creative)
         with col7:
             if st.button("Clear List", use_container_width=True):
                 st.session_state.staged_trackers = []
                 st.rerun()
 
     with bulk_tab:
+        # The Bulk Update tab logic remains unchanged as it was already correct.
         st.header("Upload CSV for Bulk Updates")
         st.info(
             "Your CSV must have these exact column headers: `advertiser_id`, `creative_id`, `tracker_type`, `tracker_url`"
@@ -159,7 +172,7 @@ if credentials:
                         st.error(f"CSV is missing required columns. It must contain: {', '.join(required_cols)}")
                     else:
                         st.success("CSV loaded successfully. Starting updates...")
-                        service = build('displayvideo', 'v3', credentials=credentials)
+                        service = build('displayvideo', 'v3', credentials=st.session_state.creds)
                         grouped = df.groupby(['advertiser_id', 'creative_id'])
 
                         results = []
@@ -192,18 +205,15 @@ if credentials:
                                             updateMask="thirdPartyUrls", body=patch_body)
                                         request.execute()
 
-                                        st.write("✅ Update successful.")
                                         results.append({'Creative ID': creative_id, 'Status': 'Success', 'Details': ''})
                                         status.update(label=f"✅ Creative ID: {creative_id} updated successfully.", state="complete")
 
                                     except Exception as e:
-                                        st.write(f"❌ Update failed: {e}")
                                         results.append({'Creative ID': creative_id, 'Status': 'Failed', 'Details': str(e)})
                                         status.update(label=f"❌ Creative ID: {creative_id} failed.", state="error")
                             except Exception as e:
-                                st.error(f"A critical error occurred processing creative {creative_id}: {e}")
                                 results.append({'Creative ID': creative_id, 'Status': 'Critical Failure', 'Details': str(e)})
-
+                            
                             progress_bar.progress((i + 1) / total_creatives)
 
                         st.header("Bulk Update Results")
