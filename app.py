@@ -53,7 +53,7 @@ def update_creative():
         return
 
     try:
-        with st.spinner("Fetching existing trackers and updating creative..."):
+        with st.spinner("Fetching, merging, and updating trackers..."):
             service = build('displayvideo', 'v3', credentials=st.session_state.creds)
 
             # 1. FETCH the existing creative data
@@ -64,11 +64,19 @@ def update_creative():
             creative_data = get_request.execute()
             existing_trackers = creative_data.get('thirdPartyUrls', [])
 
-            # 2. MODIFY the list by combining existing and new trackers
-            combined_trackers = existing_trackers + st.session_state.staged_trackers
+            # 2. MODIFY using an intelligent merge to handle both updates and additions
+            # Use a dictionary for an efficient merge (key = tracker type).
+            merged_trackers_map = {tracker['type']: tracker for tracker in existing_trackers}
+
+            # Add/overwrite with the new trackers staged in the UI.
+            for new_tracker in st.session_state.staged_trackers:
+                merged_trackers_map[new_tracker['type']] = new_tracker
+
+            # Convert the dictionary values back to the final list for the API.
+            final_trackers = list(merged_trackers_map.values())
             
-            # 3. PATCH the creative with the full, combined list
-            patch_body = {"thirdPartyUrls": combined_trackers}
+            # 3. PATCH the creative with the final, merged list
+            patch_body = {"thirdPartyUrls": final_trackers}
             patch_request = service.advertisers().creatives().patch(
                 advertiserId=st.session_state.adv_single,
                 creativeId=st.session_state.creative_single,
@@ -77,7 +85,7 @@ def update_creative():
             )
             patch_request.execute()
 
-        st.success("✅ Creative updated successfully!")
+        st.success("✅ Creative updated successfully! (Add & Update logic applied)")
         st.session_state.staged_trackers = []
         st.session_state.adv_single = ""
         st.session_state.creative_single = ""
