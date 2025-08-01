@@ -1,11 +1,9 @@
-# PRO TIP: Click the 'copy' icon in the top-right of this code block to copy it without errors.
 import streamlit as st
 import os
 import google.auth.transport.requests
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-import json
 import pandas as pd
 from io import StringIO
 
@@ -27,19 +25,15 @@ TRACKER_TYPE_MAP = {
 REVERSE_TRACKER_TYPE_MAP = {v: k for k, v in TRACKER_TYPE_MAP.items()}
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
-# --- Session State Initialization ---
-if "staged_trackers" not in st.session_state:
-    st.session_state.staged_trackers = []
-if "adv_single" not in st.session_state:
-    st.session_state.adv_single = ""
-if "creative_single" not in st.session_state:
-    st.session_state.creative_single = ""
-if "urls_single" not in st.session_state:
-    st.session_state.urls_single = ""
-if "tracker_type_single" not in st.session_state:
+# --- Session State ---
+for key in ["staged_trackers", "adv_single", "creative_single", "urls_single", "tracker_type_single"]:
+    if key not in st.session_state:
+        st.session_state[key] = "" if "single" in key else []
+
+if st.session_state.tracker_type_single == "":
     st.session_state.tracker_type_single = "Impression"
 
-# --- Callback Functions ---
+# --- Helper: Add Trackers ---
 def add_trackers():
     urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
     tracker_num = TRACKER_TYPE_MAP[st.session_state.tracker_type_single]
@@ -47,6 +41,7 @@ def add_trackers():
         st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
     st.session_state.urls_single = ""
 
+# --- Helper: Update Single Creative ---
 def update_creative():
     if not all([st.session_state.adv_single, st.session_state.creative_single, st.session_state.staged_trackers]):
         st.error("Please provide Advertiser ID, Creative ID, and add at least one tracker.")
@@ -55,38 +50,28 @@ def update_creative():
     try:
         with st.spinner("Fetching, merging, and updating trackers..."):
             service = build('displayvideo', 'v3', credentials=st.session_state.creds)
-
-            # 1. FETCH the existing creative data
             get_request = service.advertisers().creatives().get(
                 advertiserId=st.session_state.adv_single,
                 creativeId=st.session_state.creative_single
             )
             creative_data = get_request.execute()
             existing_trackers = creative_data.get('thirdPartyUrls', [])
-            staged_trackers = st.session_state.staged_trackers
-
-            # 2. PERFORM a robust, order-preserving merge
-            staged_map = {tracker['type']: tracker for tracker in staged_trackers}
+            staged_map = {tracker['type']: tracker for tracker in st.session_state.staged_trackers}
             final_trackers = []
             processed_types = set()
 
-            # Iterate through existing trackers to update them in place and preserve order.
-            for existing_tracker in existing_trackers:
-                tracker_type = existing_tracker['type']
-                if tracker_type in staged_map:
-                    # This tracker is being updated. Use the new one from staging.
-                    final_trackers.append(staged_map[tracker_type])
+            for existing in existing_trackers:
+                t_type = existing['type']
+                if t_type in staged_map:
+                    final_trackers.append(staged_map[t_type])
                 else:
-                    # This tracker is not being updated. Keep the old one.
-                    final_trackers.append(existing_tracker)
-                processed_types.add(tracker_type)
+                    final_trackers.append(existing)
+                processed_types.add(t_type)
 
-            # Add any brand new trackers that weren't in the original list.
-            for staged_tracker in staged_trackers:
-                if staged_tracker['type'] not in processed_types:
-                    final_trackers.append(staged_tracker)
-            
-            # 3. PATCH the creative with the final, merged list
+            for tracker in st.session_state.staged_trackers:
+                if tracker['type'] not in processed_types:
+                    final_trackers.append(tracker)
+
             patch_body = {"thirdPartyUrls": final_trackers}
             patch_request = service.advertisers().creatives().patch(
                 advertiserId=st.session_state.adv_single,
@@ -103,7 +88,7 @@ def update_creative():
     except Exception as e:
         st.error(f"An error occurred: {e}")
 
-# --- Main App Logic ---
+# --- Auth Handling ---
 def get_creds():
     if 'creds' in st.session_state and st.session_state.creds and st.session_state.creds.valid:
         return st.session_state.creds
@@ -144,30 +129,22 @@ def get_creds():
 
 st.session_state.creds = get_creds()
 
+# --- Main UI ---
 if st.session_state.creds:
     single_tab, bulk_tab = st.tabs(["Single Creative Update", "Bulk Update via CSV"])
 
+    # --- Single Creative ---
     with single_tab:
         st.header("1. Enter Creative Details")
         col1, col2 = st.columns(2)
-        with col1:
-            st.text_input("Advertiser ID", key="adv_single")
-        with col2:
-            st.text_input("Creative ID", key="creative_single")
+        col1.text_input("Advertiser ID", key="adv_single")
+        col2.text_input("Creative ID", key="creative_single")
 
         st.header("2. Add Trackers to Your List")
         col3, col4, col5 = st.columns([2, 3, 1])
-        with col3:
-            st.selectbox("Select Tracker Type", options=TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
-        with col4:
-            st.text_area("Enter URLs (one per line)", key="urls_single", help="Enter one URL per line.")
-        with col5:
-            st.button(
-                "Add to List",
-                use_container_width=True,
-                on_click=add_trackers,
-                disabled=(not st.session_state.urls_single)
-            )
+        col3.selectbox("Select Tracker Type", options=TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
+        col4.text_area("Enter URLs (one per line)", key="urls_single", help="Enter one URL per line.")
+        col5.button("Add to List", use_container_width=True, on_click=add_trackers, disabled=(not st.session_state.urls_single))
 
         st.subheader("Trackers Ready for Update")
         if st.session_state.staged_trackers:
@@ -179,29 +156,24 @@ if st.session_state.creds:
 
         st.header("3. Update Creative")
         col6, col7 = st.columns([1, 3])
-        with col6:
-            st.button("Update Creative", type="primary", use_container_width=True, on_click=update_creative)
-        with col7:
-            if st.button("Clear List", use_container_width=True):
-                st.session_state.staged_trackers = []
-                st.rerun()
+        col6.button("Update Creative", type="primary", use_container_width=True, on_click=update_creative)
+        if col7.button("Clear List", use_container_width=True):
+            st.session_state.staged_trackers = []
+            st.rerun()
 
+    # --- Bulk Creative ---
     with bulk_tab:
         st.header("Upload CSV for Bulk Updates")
-        st.info(
-            "Your CSV must have these exact column headers: `advertiser_id`, `creative_id`, `tracker_type`, `tracker_url`"
-        )
-        st.write("For `tracker_type`, use the official name (e.g., Impression, Start, Complete). Separate multiple URLs in the `tracker_url` cell with a comma.")
-
+        st.info("CSV must contain: `advertiser_id`, `creative_id`, `tracker_type`, `tracker_url`")
         uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 
         if st.button("Process Bulk Update", type="primary"):
-            if uploaded_file is not None:
+            if uploaded_file:
                 try:
                     df = pd.read_csv(uploaded_file, dtype=str).fillna('')
                     required_cols = {'advertiser_id', 'creative_id', 'tracker_type', 'tracker_url'}
                     if not required_cols.issubset(df.columns):
-                        st.error(f"CSV is missing required columns. It must contain: {', '.join(required_cols)}")
+                        st.error(f"CSV missing required columns: {', '.join(required_cols)}")
                     else:
                         st.success("CSV loaded successfully. Starting updates...")
                         service = build('displayvideo', 'v3', credentials=st.session_state.creds)
@@ -209,49 +181,63 @@ if st.session_state.creds:
 
                         results = []
                         progress_bar = st.progress(0)
-                        total_creatives = len(grouped)
+                        total = len(grouped)
 
                         for i, (ids, group) in enumerate(grouped):
                             adv_id, creative_id = ids
                             try:
                                 with st.status(f"Processing Creative ID: {creative_id}", expanded=False) as status:
                                     try:
-                                        # NOTE: Bulk mode still performs a full replacement based on the CSV group.
-                                        third_party_urls = []
-                                        for _, row in group.iterrows():
-                                            tracker_name = row['tracker_type']
-                                            if tracker_name in TRACKER_TYPE_MAP:
-                                                tracker_num = TRACKER_TYPE_MAP[tracker_name]
-                                                urls_string = row['tracker_url']
-                                                individual_urls = [url.strip() for url in urls_string.split(',') if url.strip()]
-                                                for url in individual_urls:
-                                                    third_party_urls.append({
-                                                        "type": tracker_num,
-                                                        "url": url
-                                                    })
-                                            else:
-                                                st.warning(f"Skipping unknown tracker type '{tracker_name}'")
+                                        get_request = service.advertisers().creatives().get(
+                                            advertiserId=adv_id, creativeId=creative_id)
+                                        creative_data = get_request.execute()
+                                        existing_trackers = creative_data.get('thirdPartyUrls', [])
 
-                                        patch_body = {"thirdPartyUrls": third_party_urls}
+                                        staged_trackers = []
+                                        for _, row in group.iterrows():
+                                            tracker_name = row['tracker_type'].strip()
+                                            if tracker_name in TRACKER_TYPE_MAP:
+                                                t_type = TRACKER_TYPE_MAP[tracker_name]
+                                                urls = [u.strip() for u in row['tracker_url'].split(',') if u.strip()]
+                                                for url in urls:
+                                                    staged_trackers.append({"type": t_type, "url": url})
+                                            else:
+                                                st.warning(f"Unknown tracker type '{tracker_name}' in Creative ID {creative_id}")
+
+                                        staged_map = {t['type']: t for t in staged_trackers}
+                                        final_trackers = []
+                                        processed = set()
+
+                                        for t in existing_trackers:
+                                            t_type = t['type']
+                                            if t_type in staged_map:
+                                                final_trackers.append(staged_map[t_type])
+                                            else:
+                                                final_trackers.append(t)
+                                            processed.add(t_type)
+
+                                        for t in staged_trackers:
+                                            if t['type'] not in processed:
+                                                final_trackers.append(t)
+
+                                        patch_body = {"thirdPartyUrls": final_trackers}
                                         request = service.advertisers().creatives().patch(
                                             advertiserId=adv_id, creativeId=creative_id,
                                             updateMask="thirdPartyUrls", body=patch_body)
                                         request.execute()
 
                                         results.append({'Creative ID': creative_id, 'Status': 'Success', 'Details': ''})
-                                        status.update(label=f"✅ Creative ID: {creative_id} updated successfully.", state="complete")
-
+                                        status.update(label=f"✅ Creative ID: {creative_id} updated.", state="complete")
                                     except Exception as e:
                                         results.append({'Creative ID': creative_id, 'Status': 'Failed', 'Details': str(e)})
                                         status.update(label=f"❌ Creative ID: {creative_id} failed.", state="error")
                             except Exception as e:
                                 results.append({'Creative ID': creative_id, 'Status': 'Critical Failure', 'Details': str(e)})
-                            
-                            progress_bar.progress((i + 1) / total_creatives)
+                            progress_bar.progress((i + 1) / total)
 
                         st.header("Bulk Update Results")
                         st.dataframe(pd.DataFrame(results), use_container_width=True)
                 except Exception as e:
-                    st.error(f"An error occurred while processing the file: {e}")
+                    st.error(f"Error processing CSV: {e}")
             else:
                 st.error("Please upload a CSV file first.")
