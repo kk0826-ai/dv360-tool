@@ -81,11 +81,16 @@ def merge_trackers(existing, staged):
 # --- Add Trackers ---
 def add_trackers():
     urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
-    tracker_label = st.session_state.tracker_type_single
+    tracker_label = st.session_state.tracker_type_single  # What user selected in dropdown
     tracker_num = TRACKER_TYPE_MAP[tracker_label]
+
     for url in urls:
         st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
     st.session_state.urls_single = ""
+
+    # ✅ DEBUG: Log what's actually being added
+    st.write("🧪 You just added:", [{"type": tracker_num, "label": tracker_label, "url": url} for url in urls])
+    st.write("🧪 All staged trackers so far:", st.session_state.staged_trackers)
 
 # --- Update Creative ---
 def update_creative():
@@ -128,7 +133,8 @@ if st.session_state.creds:
 
         st.header("2. Add Third-Party Trackers")
         c1, c2, c3 = st.columns([2, 3, 1])
-        c1.selectbox("Tracker Type", TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
+        # ✅ Fix applied here: key="tracker_type_single"
+        c1.selectbox("Select Tracker Type", TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
         c2.text_area("Tracker URLs (1 per line)", key="urls_single")
         c3.button("Add to List", on_click=add_trackers, disabled=not st.session_state.urls_single)
 
@@ -146,62 +152,3 @@ if st.session_state.creds:
         if col7.button("Clear"):
             st.session_state.staged_trackers = []
             st.rerun()
-
-    with bulk_tab:
-        st.header("Bulk CSV Upload")
-        st.info("CSV must include: `advertiser_id`, `creative_id`, `tracker_type`, `tracker_url`")
-        file = st.file_uploader("Upload CSV", type="csv")
-
-        if st.button("Process Bulk Update", type="primary"):
-            if not file:
-                st.error("Please upload a CSV file.")
-            else:
-                try:
-                    df = pd.read_csv(file, dtype=str).fillna('')
-                    required = {'advertiser_id', 'creative_id', 'tracker_type', 'tracker_url'}
-                    if not required.issubset(df.columns):
-                        st.error(f"CSV must contain: {', '.join(required)}")
-                    else:
-                        service = build('displayvideo', 'v3', credentials=st.session_state.creds)
-                        grouped = df.groupby(['advertiser_id', 'creative_id'])
-                        results = []
-                        pbar = st.progress(0)
-                        total = len(grouped)
-
-                        for i, ((adv_id, creative_id), group) in enumerate(grouped):
-                            with st.status(f"Updating Creative: {creative_id}", expanded=False) as status:
-                                try:
-                                    creative = service.advertisers().creatives().get(
-                                        advertiserId=adv_id, creativeId=creative_id).execute()
-                                    
-                                    staged = []
-                                    for _, row in group.iterrows():
-                                        tracker_type = row['tracker_type'].strip()
-                                        if tracker_type not in TRACKER_TYPE_MAP:
-                                            st.warning(f"Unknown tracker type '{tracker_type}' in Creative {creative_id}")
-                                            continue
-                                        tracker_num = TRACKER_TYPE_MAP[tracker_type]
-                                        urls = [u.strip() for u in row['tracker_url'].split(',') if u.strip()]
-                                        for url in urls:
-                                            staged.append({"type": tracker_num, "url": url})
-
-                                    merged = merge_trackers(creative.get("thirdPartyUrls", []), staged)
-
-                                    service.advertisers().creatives().patch(
-                                        advertiserId=adv_id, creativeId=creative_id,
-                                        updateMask="thirdPartyUrls",
-                                        body={"thirdPartyUrls": merged}
-                                    ).execute()
-
-                                    results.append({"Creative ID": creative_id, "Status": "✅ Success"})
-                                    status.update(label=f"✅ {creative_id} updated", state="complete")
-                                except Exception as e:
-                                    results.append({"Creative ID": creative_id, "Status": f"❌ Failed: {e}"})
-                                    status.update(label=f"❌ {creative_id} failed", state="error")
-
-                            pbar.progress((i + 1) / total)
-
-                        st.subheader("Results")
-                        st.dataframe(pd.DataFrame(results), use_container_width=True)
-                except Exception as e:
-                    st.error(f"Error processing CSV: {e}")
