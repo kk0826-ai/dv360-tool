@@ -17,7 +17,6 @@ st.title("Bulk Creative Updater Workflow")
 def mock_fetch_creative_details(creative_id):
     """
     Placeholder function to simulate fetching data from DV360 API.
-    In the real app, this will make a live call to the DV360 API.
     """
     mock_data = {
         "111111": {"name": "Creative One", "trackers": [{"type": "Impression", "url": "http://a.com"}, {"type": "Start", "url": "http://b.com"}]},
@@ -37,13 +36,11 @@ def generate_excel_file(df):
         workbook = writer.book
         worksheet = writer.sheets['Trackers']
 
-        # Define the fill patterns for alternating colors
         light_grey_fill = PatternFill(start_color='E7E6E6', end_color='E7E6E6', fill_type='solid')
         
         current_creative_id = None
         use_grey = False
 
-        # Iterate through rows to apply colors, skipping the header (row 1)
         for row_num, row_data in enumerate(df.itertuples(index=False), start=2):
             if row_data.creative_id != current_creative_id:
                 current_creative_id = row_data.creative_id
@@ -61,7 +58,6 @@ def generate_excel_file(df):
 # --- Phase 1: Upload Creative IDs and Process ---
 st.header("Phase 1: Upload Creative IDs")
 
-# Initialize session state
 if 'processed_data' not in st.session_state:
     st.session_state.processed_data = None
 
@@ -70,14 +66,22 @@ uploaded_ids_file = st.file_uploader("Upload a one-column CSV with your Creative
 if uploaded_ids_file:
     if st.button("Process IDs and Show Results"):
         try:
-            # Correctly read all creative IDs from the first column
-            id_df = pd.read_csv(uploaded_ids_file, header=None if pd.read_csv(uploaded_ids_file, nrows=1).iloc[0,0] != 'creative_id' else 0)
+            # --- CORRECTED CSV READING LOGIC ---
+            # This is more robust and will auto-detect the separator.
+            # It reads the file into a temporary buffer to avoid issues with the uploader.
+            file_buffer = BytesIO(uploaded_ids_file.getvalue())
+            id_df = pd.read_csv(file_buffer, sep=None, engine='python', header=None)
+            
             creative_ids = id_df.iloc[:, 0].astype(str).tolist()
             
             with st.spinner(f"Fetching data for {len(creative_ids)} creatives... This may take a while."):
                 all_trackers_data = []
                 progress_bar = st.progress(0)
                 for i, creative_id in enumerate(creative_ids):
+                    # Check if the value is a potential header
+                    if creative_id.lower() == 'creative_id':
+                        continue # Skip the header row
+
                     details = mock_fetch_creative_details(creative_id)
                     if details["trackers"]:
                         for tracker in details["trackers"]:
