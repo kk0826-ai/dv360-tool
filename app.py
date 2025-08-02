@@ -37,7 +37,7 @@ TRACKER_MAP_STANDARD = {
 
 TRACKER_MAP_CUSTOM = {
     "Impression": 1,
-    "Click tracking": 2,  # Matches actual behavior in your DV360 UI
+    "Click tracking": 2,
     "Start": 3,
     "First quartile": 4,
     "Midpoint": 5,
@@ -145,23 +145,19 @@ def update_creative():
             existing = creative_data.get('thirdPartyUrls', [])
             staged = st.session_state.staged_trackers
 
-            # Create a final merged list
-            merged = []
-            types_seen = set()
-
-            # Replace or keep existing
-            for tracker in existing:
-                if tracker['type'] in [t['type'] for t in staged]:
-                    replacement = [t for t in staged if t['type'] == tracker['type']][0]
-                    merged.append(replacement)
-                    types_seen.add(tracker['type'])
-                else:
-                    merged.append(tracker)
-
-            # Add brand new ones
+            # --- Group staged trackers by type ---
+            staged_by_type = {}
             for tracker in staged:
-                if tracker['type'] not in types_seen:
-                    merged.append(tracker)
+                staged_by_type.setdefault(tracker['type'], []).append(tracker)
+
+            # --- Filter out all existing trackers that are being replaced ---
+            types_to_replace = set(staged_by_type.keys())
+            retained_existing = [t for t in existing if t['type'] not in types_to_replace]
+
+            # --- Final merge: retained + all new trackers ---
+            merged = retained_existing
+            for same_type_trackers in staged_by_type.values():
+                merged.extend(same_type_trackers)
 
             patch_body = {"thirdPartyUrls": merged}
             service.advertisers().creatives().patch(
