@@ -163,4 +163,95 @@ if creds:
                     trackers = creative_data.get("thirdPartyUrls", [])
                     if trackers:
                         reverse_map = {v: k for k, v in TRACKER_MAP_HOSTED_VIDEO.items()}
-                        display
+                        display_data = [
+                            {"event_type": reverse_map.get(t.get('type'), t.get('type')), "url": t.get('url')}
+                            for t in trackers
+                        ]
+                        display_df = pd.DataFrame(display_data)
+                        st.dataframe(display_df)
+                    else:
+                        st.write("No third-party trackers found.")
+
+    if st.session_state.processed_df is not None and not st.session_state.processed_df.empty:
+        st.header("Download Combined File")
+        excel_data = generate_excel_file(st.session_state.processed_df)
+        st.download_button(
+            label="📥 Download Combined Excel File to Edit",
+            data=excel_data,
+            file_name="dv360_trackers_to_edit.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    # --- Phase 2: Upload Edited File for Validation and Review ---
+    st.header("Phase 2: Upload Your Edited Excel File")
+    edited_file = st.file_uploader("Upload the Excel file you edited", type="xlsx")
+
+    if edited_file:
+        if st.button("Validate and Review Changes"):
+            try:
+                with st.spinner("Validating file and comparing changes..."):
+                    edited_df = pd.read_excel(edited_file).fillna('')
+                    original_df = st.session_state.processed_df.fillna('')
+
+                    # --- New, Intelligent Validation Logic ---
+                    # Create a unique key for each tracker
+                    original_df['key'] = original_df['creative_id'].astype(str) + original_df['event_type'] + original_df['existing_url']
+                    edited_df['key'] = edited_df['creative_id'].astype(str) + edited_df['event_type'] + edited_df['existing_url']
+                    
+                    # Find what was deleted
+                    deleted_rows = original_df[~original_df['key'].isin(edited_df['key'])]
+                    
+                    # Find what was added (new rows have no existing_url)
+                    added_rows = edited_df[edited_df['existing_url'] == '']
+                    
+                    # Find what was updated (existed before, has a new_url now)
+                    updated_rows = edited_df[
+                        (edited_df['key'].isin(original_df['key'])) & 
+                        (edited_df['new_url'] != '')
+                    ]
+
+                    st.subheader("Review Your Planned Changes")
+                    st.info("✅ Your file has been validated successfully.")
+                    st.write(f"🔵 **TO BE UPDATED:** {len(updated_rows)} trackers.")
+                    st.write(f"🟢 **TO BE ADDED:** {len(added_rows)} new trackers.")
+                    st.write(f"🔴 **TO BE DELETED:** {len(deleted_rows)} trackers.")
+                    
+                    st.session_state.update_plan = edited_df
+            except Exception as e:
+                st.error(f"An error occurred during validation: {e}")
+
+
+    # --- Phase 3: Final Confirmation ---
+    if st.session_state.update_plan is not None:
+        st.header("Phase 3: Confirm and Push to DV360")
+        st.warning("⚠️ **FINAL WARNING:** This action is irreversible.")
+        
+        if st.button("Confirm and Send to DV360", type="primary"):
+            try:
+                with st.spinner("Sending updates to the DV3G0 API..."):
+                    plan_df = st.session_state.update_plan
+                    service = build('displayvideo', 'v3', credentials=creds)
+
+                    for creative_id, group in plan_df.groupby('creative_id'):
+                        final_trackers = []
+                        adv_id = group['advertiser_id'].iloc[0]
+                        for _, row in group.iterrows():
+                            url_to_use = row['new_url'] if pd.notna(row['new_url']) and str(row['new_url']).strip() else row['existing_url']
+                            if pd.notna(row['event_type']) and pd.notna(url_to_use):
+                                api_type = TRACKER_MAP_HOSTED_VIDEO.get(row['event_type'], row['event_type'])
+                                final_trackers.append({"type": api_type, "url": str(url_to_use)})
+                        
+                        service.advertisers().creatives().patch(
+                            advertiserId=str(adv_id),
+                            creativeId=str(creative_id),
+                            updateMask="thirdPartyUrls",
+                            body={"thirdPartyUrls": final_trackers}
+                        ).execute()
+
+                    st.success("All updates have been processed successfully!")
+                    # Clear session state to reset the app
+                    for key in ['processed_df', 'individual_results', 'update_plan']:
+                        st.session_state[key] = None
+
+            except Exception as e:
+                st.error(f"An error occurred during the final update: {e}")
