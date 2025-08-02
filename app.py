@@ -143,13 +143,15 @@ def update_creative():
         return
     try:
         with st.spinner("Updating creative..."):
-            # The edited data from st.data_editor is a list of dictionaries.
-            # We can iterate over it directly without creating a new DataFrame.
-            edited_data = st.session_state.tracker_table
+            # Convert the edited data from the data_editor's state into a DataFrame.
+            # This is the most reliable way to handle the edited data.
+            edited_df = pd.DataFrame(st.session_state.tracker_table)
+            
             final_trackers = []
             tracker_map = st.session_state.tracker_map
 
-            for row in edited_data:
+            # Now, iterate over the rows of the clean DataFrame.
+            for _, row in edited_df.iterrows():
                 event_type_val = row['event_type']
                 # Prioritize new URL, but fall back to existing if new is empty
                 url_to_use = row['new_url'].strip() if pd.notna(row['new_url']) and row['new_url'].strip() else row['existing_url']
