@@ -125,8 +125,13 @@ def load_existing_trackers():
         trackers = creative.get("thirdPartyUrls", [])
         df = pd.DataFrame(trackers)
         if not df.empty:
+            df['type'] = df['type'].astype(int)
             df['event_type'] = df['type'].map(reverse_map)
             df['existing_url'] = df['url']
+
+            unmapped = df[df['event_type'].isna()]
+            if not unmapped.empty:
+                st.warning("Some tracker types couldn't be mapped and will show blank event types.")
         else:
             df = pd.DataFrame(columns=['event_type', 'existing_url'])
 
