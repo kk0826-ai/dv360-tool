@@ -26,7 +26,7 @@ TRACKER_MAP_HOSTED_VIDEO = {
     "Third quartile": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_THIRD_QUARTILE",
     "Complete": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_COMPLETE",
 }
-# Add other maps (VAST, Standard) and a detection function if needed for other creative types
+# A full implementation would have other maps and a detection function
 
 # --- Authentication ---
 SCOPES = ['https://www.googleapis.com/auth/display-video']
@@ -87,12 +87,19 @@ def generate_excel_file(df):
 creds = get_creds()
 
 if creds:
+    # --- Initialize Session State ---
+    if 'processed_df' not in st.session_state:
+        st.session_state.processed_df = None
+    if 'individual_results' not in st.session_state:
+        st.session_state.individual_results = None
+
+    # --- Phase 1: Uploader ---
     st.header("Phase 1: Upload Creative IDs")
     advertiser_id = st.text_input("Enter the Advertiser ID for all creatives")
     uploaded_ids_file = st.file_uploader("Upload a one-column CSV with your Creative IDs", type="csv")
 
-    if uploaded_ids_file and advertiser_id:
-        if st.button("Process IDs and Show Results"):
+    if st.button("Process IDs and Show Results"):
+        if uploaded_ids_file and advertiser_id:
             try:
                 raw_text = uploaded_ids_file.getvalue().decode('utf-8')
                 lines = raw_text.splitlines()
@@ -101,68 +108,78 @@ if creds:
                 if not creative_ids:
                     st.error("The uploaded file contains no valid Creative IDs.")
                 else:
-                    st.session_state.all_creative_data = [] # Store all data for combined download
-                    st.session_state.individual_results = [] # Store individual results for display
                     service = build('displayvideo', 'v3', credentials=creds)
+                    
+                    all_trackers_data = []
+                    individual_results_list = []
                     
                     with st.spinner(f"Fetching data for {len(creative_ids)} creatives..."):
                         progress_bar = st.progress(0)
                         for i, creative_id in enumerate(creative_ids):
                             details = fetch_creative_details(service, advertiser_id, creative_id)
-                            st.session_state.individual_results.append(details) # Add for display
+                            individual_results_list.append(details)
                             
-                            # Process and add to the combined list for download
                             if details:
-                                if details.get("thirdPartyUrls"):
-                                    for tracker in details["thirdPartyUrls"]:
-                                        st.session_state.all_creative_data.append({
+                                trackers = details.get("thirdPartyUrls", [])
+                                creative_name = details.get("displayName", "N/A")
+                                reverse_map = {v: k for k, v in TRACKER_MAP_HOSTED_VIDEO.items()}
+
+                                if trackers:
+                                    for tracker in trackers:
+                                        api_type = tracker.get('type')
+                                        event_type = reverse_map.get(api_type, api_type)
+                                        # Updated to include the specific columns requested
+                                        all_trackers_data.append({
                                             "creative_id": creative_id,
-                                            "creative_name": details.get("displayName", "N/A"),
-                                            "event_type": tracker.get("type"), # Store raw type for now
-                                            "url": tracker.get("url")
+                                            "creative_name": creative_name,
+                                            "event_type": event_type,
+                                            "existing_url": tracker.get("url"),
+                                            "new_url": "" # Add the empty new_url column
                                         })
                                 else:
-                                    st.session_state.all_creative_data.append({
+                                    all_trackers_data.append({
                                         "creative_id": creative_id,
-                                        "creative_name": details.get("displayName", "N/A"),
+                                        "creative_name": creative_name,
                                         "event_type": "",
-                                        "url": ""
+                                        "existing_url": "",
+                                        "new_url": ""
                                     })
                             progress_bar.progress((i + 1) / len(creative_ids))
                     
-                    st.success("Data extraction complete. Results are shown below.")
-
+                    st.session_state.individual_results = individual_results_list
+                    st.session_state.processed_df = pd.DataFrame(all_trackers_data)
+                    st.success("Data extraction complete.")
             except Exception as e:
                 st.error(f"An error occurred: {e}")
+        else:
+            st.warning("Please provide an Advertiser ID and upload a file.")
 
-    # --- Display Folded Results AND the Combined Download Button ---
-    if 'individual_results' in st.session_state and st.session_state.individual_results:
+    # --- Display Results and Global Download Button ---
+    if st.session_state.individual_results:
         st.header("Extracted Creative Details")
-        st.info("Click on each creative to view its trackers. Use the button below to download a combined Excel file.")
+        st.info("Click on each creative to view its trackers.")
 
-        # Display individual expanders
         for creative_data in st.session_state.individual_results:
             if creative_data:
                 name = creative_data.get('displayName', 'N/A')
                 c_id = creative_data.get('creativeId', 'N/A')
                 with st.expander(f"Creative: {name} (ID: {c_id})"):
-                    st.write(creative_data.get("thirdPartyUrls", "No third-party trackers found."))
+                    # Display a simplified table inside the expander
+                    trackers = creative_data.get("thirdPartyUrls", [])
+                    if trackers:
+                        st.json(trackers)
+                    else:
+                        st.write("No third-party trackers found.")
 
-        # Create and show the combined download button
-        if st.session_state.all_creative_data:
-            df_for_export = pd.DataFrame(st.session_state.all_creative_data)
-            
-            # Map the raw event types to friendly names for the export file
-            reverse_map = {v: k for k, v in TRACKER_MAP_HOSTED_VIDEO.items()} # Assumes hosted video
-            df_for_export['event_type'] = df_for_export['event_type'].map(reverse_map).fillna(df_for_export['event_type'])
-
-            excel_data = generate_excel_file(df_for_export)
-            st.download_button(
-                label="📥 Download Combined Excel File to Edit",
-                data=excel_data,
-                file_name="dv360_trackers_to_edit.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    if st.session_state.processed_df is not None and not st.session_state.processed_df.empty:
+        st.header("Download Combined File")
+        excel_data = generate_excel_file(st.session_state.processed_df)
+        st.download_button(
+            label="📥 Download Combined Excel File to Edit",
+            data=excel_data,
+            file_name="dv360_trackers_to_edit.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     # --- Placeholder for Phase 2 and 3 ---
     st.header("Phase 2: Upload Your Edited Excel File")
