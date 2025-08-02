@@ -49,7 +49,6 @@ TRACKER_MAP_HOSTED_VIDEO = {
     "Complete": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_COMPLETE",
 }
 
-
 # --- Functions ---
 def detect_tracker_map(creative_data):
     creative_type = creative_data.get("creativeType")
@@ -131,26 +130,23 @@ def load_existing_trackers():
                 df = pd.DataFrame(columns=['event_type', 'existing_url'])
 
             df['new_url'] = ""
-            st.session_state.editable_tracker_df = df[['event_type', 'existing_url', 'new_url']]
+            # Initialize the state for the data editor
+            st.session_state.tracker_df = df[['event_type', 'existing_url', 'new_url']]
             st.success("Trackers loaded successfully.")
 
     except Exception as e:
         st.error(f"Error loading creative: {e}")
 
-# --- New Callback to save edits reliably ---
-def save_edits():
-    st.session_state.editable_tracker_df = pd.DataFrame(st.session_state.tracker_table)
-
-
 def update_creative():
-    # The update function now reads from our clean "master copy" of the data
-    if st.session_state.editable_tracker_df is None:
+    # The update function now reads the final state from the editor key
+    if "tracker_table" not in st.session_state:
         st.error("No tracker data to update. Please load trackers first.")
         return
     try:
         with st.spinner("Updating creative..."):
-            # Read from the reliable DataFrame, not the editor's internal state
-            edited_df = st.session_state.editable_tracker_df
+            # Convert the final state of the editor to a DataFrame
+            edited_df = pd.DataFrame(st.session_state.tracker_table)
+            
             final_trackers = []
             tracker_map = st.session_state.tracker_map
 
@@ -180,9 +176,13 @@ def update_creative():
 # --- Main UI ---
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
-for key, default in {"editable_tracker_df": None, "adv_single": "", "creative_single": ""}.items():
-    if key not in st.session_state:
-        st.session_state[key] = default
+# Initialize session state keys
+if "tracker_df" not in st.session_state:
+    st.session_state.tracker_df = None
+if "adv_single" not in st.session_state:
+    st.session_state.adv_single = ""
+if "creative_single" not in st.session_state:
+    st.session_state.creative_single = ""
 
 st.session_state.creds = get_creds()
 
@@ -196,15 +196,17 @@ if st.session_state.creds:
 
     st.button("Load Existing Trackers", on_click=load_existing_trackers)
 
-    if st.session_state.editable_tracker_df is not None:
+    # Only show the editor if the DataFrame has been loaded into session state
+    if st.session_state.tracker_df is not None:
         st.subheader("Edit Trackers")
-        st.info("Edit the table below. Your changes are saved automatically. Click 'Update Creative' when finished.")
+        st.info("Edit the 'new_url' column, add/delete rows, then click Update.")
         
         current_map = st.session_state.get("tracker_map", TRACKER_MAP_STANDARD)
         event_options = list(current_map.keys())
         
+        # The data editor's state is stored in st.session_state.tracker_table
         st.data_editor(
-            st.session_state.editable_tracker_df,
+            st.session_state.tracker_df, # Initialize with the loaded data
             num_rows="dynamic",
             use_container_width=True,
             column_config={
@@ -221,7 +223,6 @@ if st.session_state.creds:
                     "New or Updated URL",
                 ),
             },
-            key="tracker_table",
-            on_change=save_edits # Use the callback to save edits reliably
+            key="tracker_table"
         )
         st.button("Update Creative", on_click=update_creative, type="primary")
