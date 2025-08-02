@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import re
 import google.auth.transport.requests
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -13,7 +14,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("DV360 Creative Updater")
+st.title("DV360 Bulk Creative Updater")
 
 # --- Tracker Type Maps ---
 TRACKER_MAP_STANDARD = {
@@ -49,21 +50,11 @@ TRACKER_MAP_HOSTED_VIDEO = {
     "Complete": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_COMPLETE",
 }
 
+ALL_TRACKER_MAPS = {**TRACKER_MAP_STANDARD, **TRACKER_MAP_VAST_VIDEO, **TRACKER_MAP_HOSTED_VIDEO}
 
 # --- Functions ---
-def detect_tracker_map(creative_data):
-    creative_type = creative_data.get("creativeType")
-    hosting_source = creative_data.get("hostingSource")
-
-    if creative_type == "CREATIVE_TYPE_VIDEO":
-        if hosting_source == "HOSTING_SOURCE_HOSTED":
-            return TRACKER_MAP_HOSTED_VIDEO
-        else:
-            return TRACKER_MAP_VAST_VIDEO
-            
-    return TRACKER_MAP_STANDARD
-
 def get_creds():
+    # This function is assumed to be working correctly.
     if 'creds' in st.session_state and st.session_state.creds and st.session_state.creds.valid:
         return st.session_state.creds
     if os.path.exists('token.json'):
@@ -100,144 +91,104 @@ def get_creds():
             st.error(f"Error fetching token: {e}")
     return None
 
-def load_existing_trackers():
-    if not all([st.session_state.adv_single, st.session_state.creative_single]):
-        st.error("Please enter both Advertiser and Creative ID.")
+def parse_raw_tracker_block(text_block, tracker_map):
+    """
+    Intelligently parses a block of text to find URLs and their associated event types.
+    """
+    parsed_trackers = []
+    # Regex to find all URLs
+    urls = re.findall(r'https?://[^\s]+', text_block)
+    
+    # Reverse map for finding friendly names
+    reverse_map = {v: k for k, v in tracker_map.items()}
+
+    for url in urls:
+        # Check for keywords within the URL itself
+        for friendly_name, api_name in tracker_map.items():
+            # Use a simple keyword check in the URL
+            if friendly_name.lower() in url.lower():
+                parsed_trackers.append({"type": api_name, "url": url})
+                break # Move to next URL once a match is found
+    
+    # This is a simplified parser. A more advanced version could use surrounding text.
+    return parsed_trackers
+
+
+def process_bulk_update():
+    if st.session_state.uploaded_file is None:
+        st.error("Please upload a CSV file first.")
         return
+    
     try:
-        with st.spinner("Loading creative trackers..."):
-            service = build('displayvideo', 'v3', credentials=st.session_state.creds)
-            creative = service.advertisers().creatives().get(
-                advertiserId=st.session_state.adv_single,
-                creativeId=st.session_state.creative_single
-            ).execute()
-
-            st.session_state.tracker_map = detect_tracker_map(creative)
-            reverse_map = {v: k for k, v in st.session_state.tracker_map.items()}
-            trackers = creative.get("thirdPartyUrls", [])
+        df = pd.read_csv(st.session_state.uploaded_file)
+        if not {'creative_id', 'raw_tracker_block'}.issubset(df.columns):
+            st.error("CSV must contain 'creative_id' and 'raw_tracker_block' columns.")
+            return
             
-            processed_trackers = []
-            if trackers:
-                for tracker in trackers:
-                    api_type = tracker.get('type')
-                    event_type = reverse_map.get(api_type, api_type)
-                    processed_trackers.append({
-                        'event_type': event_type,
-                        'existing_url': tracker.get('url', '')
-                    })
+        st.success("File validated. Starting bulk update process...")
+        
+        service = build('displayvideo', 'v3', credentials=st.session_state.creds)
+        results = []
+        progress_bar = st.progress(0)
+
+        for i, row in df.iterrows():
+            creative_id = str(row['creative_id'])
+            raw_block = str(row['raw_tracker_block'])
             
-            df = pd.DataFrame(processed_trackers)
-            if df.empty:
-                df = pd.DataFrame(columns=['event_type', 'existing_url'])
-
-            df['new_url'] = ""
-            st.session_state.tracker_df = df
-            st.success("Trackers loaded successfully.")
-
-    except Exception as e:
-        st.error(f"Error loading creative: {e}")
-
-def update_creative():
-    if "tracker_table" not in st.session_state or st.session_state.tracker_df is None:
-        st.error("No tracker data to update. Please load trackers first.")
-        return
-    try:
-        with st.spinner("Applying edits and updating creative..."):
-            # Start with the original, clean DataFrame
-            edited_df = st.session_state.tracker_df.copy()
-            # Get the delta object from the editor's state
-            delta = st.session_state.tracker_table
-
-            # --- Apply Deltas to Reconstruct the Final DataFrame ---
-            # 1. Apply Edits
-            for row_idx, changes in delta.get("edited_rows", {}).items():
-                for col_name, new_value in changes.items():
-                    edited_df.loc[int(row_idx), col_name] = new_value
-
-            # 2. Apply Deletions
-            if delta.get("deleted_rows"):
-                edited_df = edited_df.drop(index=delta["deleted_rows"]).reset_index(drop=True)
-
-            # 3. Apply Additions
-            if delta.get("added_rows"):
-                added_df = pd.DataFrame(delta["added_rows"], columns=edited_df.columns)
-                edited_df = pd.concat([edited_df, added_df], ignore_index=True)
-
-            # --- Now process the reconstructed, clean DataFrame ---
-            final_trackers = []
-            tracker_map = st.session_state.tracker_map
-
-            for _, row in edited_df.iterrows():
-                event_type_val = row['event_type']
-                url_to_use = row['new_url'].strip() if pd.notna(row['new_url']) and row['new_url'].strip() else row['existing_url']
+            try:
+                # 1. Fetch the creative to determine its type
+                creative = service.advertisers().creatives().get(
+                    advertiserId=st.session_state.adv_id,
+                    creativeId=creative_id
+                ).execute()
                 
-                if pd.notna(event_type_val) and pd.notna(url_to_use) and url_to_use:
-                    api_type = tracker_map.get(event_type_val, event_type_val)
-                    final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
+                existing_trackers = creative.get("thirdPartyUrls", [])
+                
+                # 2. Parse the new trackers from the raw block
+                tracker_map_for_creative = ALL_TRACKER_MAPS # Use a combined map for parsing
+                parsed_new_trackers = parse_raw_tracker_block(raw_block, tracker_map_for_creative)
 
-            # Send the update to the API
-            service = build('displayvideo', 'v3', credentials=st.session_state.creds)
-            service.advertisers().creatives().patch(
-                advertiserId=st.session_state.adv_single,
-                creativeId=st.session_state.creative_single,
-                updateMask="thirdPartyUrls",
-                body={"thirdPartyUrls": final_trackers}
-            ).execute()
+                # 3. Intelligently merge existing and new trackers
+                final_trackers_map = {t['type']: t for t in existing_trackers}
+                for new_tracker in parsed_new_trackers:
+                    final_trackers_map[new_tracker['type']] = new_tracker
+                
+                final_trackers = list(final_trackers_map.values())
+                
+                # 4. Patch the creative
+                service.advertisers().creatives().patch(
+                    advertiserId=st.session_state.adv_id,
+                    creativeId=creative_id,
+                    updateMask="thirdPartyUrls",
+                    body={"thirdPartyUrls": final_trackers}
+                ).execute()
+                
+                results.append({"Creative ID": creative_id, "Status": "✅ Success", "Details": ""})
 
-            st.success("✅ Creative updated successfully!")
-            load_existing_trackers()
+            except Exception as e:
+                results.append({"Creative ID": creative_id, "Status": "❌ Failed", "Details": str(e)})
+
+            progress_bar.progress((i + 1) / len(df))
+            
+        st.subheader("Bulk Update Results")
+        st.dataframe(pd.DataFrame(results), use_container_width=True)
 
     except Exception as e:
-        st.error(f"An error occurred while updating: {e}")
+        st.error(f"An error occurred while processing the file: {e}")
 
 
 # --- Main UI ---
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
-if "tracker_df" not in st.session_state:
-    st.session_state.tracker_df = None
-if "adv_single" not in st.session_state:
-    st.session_state.adv_single = ""
-if "creative_single" not in st.session_state:
-    st.session_state.creative_single = ""
-
 st.session_state.creds = get_creds()
 
 if st.session_state.creds:
-    st.header("Single Creative Update")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.text_input("Advertiser ID", key="adv_single")
-    with col2:
-        st.text_input("Creative ID", key="creative_single")
+    st.header("1. Enter Advertiser ID")
+    st.text_input("Advertiser ID", key="adv_id")
+    
+    st.header("2. Upload Your Bulk File")
+    st.info("Please upload a CSV file with two columns: `creative_id` and `raw_tracker_block`.")
+    st.file_uploader("Upload CSV", type="csv", key="uploaded_file")
 
-    st.button("Load Existing Trackers", on_click=load_existing_trackers)
-
-    if st.session_state.tracker_df is not None:
-        st.subheader("Edit Trackers")
-        st.info("Edit the 'new_url' column, add/delete rows, then click Update.")
-        
-        current_map = st.session_state.get("tracker_map", TRACKER_MAP_STANDARD)
-        event_options = list(current_map.keys())
-        
-        st.data_editor(
-            st.session_state.tracker_df,
-            num_rows="dynamic",
-            use_container_width=True,
-            column_config={
-                "event_type": st.column_config.SelectboxColumn(
-                    "Event Type",
-                    options=event_options,
-                    required=True,
-                ),
-                 "existing_url": st.column_config.TextColumn(
-                    "Existing URL",
-                    disabled=True,
-                ),
-                "new_url": st.column_config.TextColumn(
-                    "New or Updated URL",
-                ),
-            },
-            key="tracker_table"
-        )
-        st.button("Update Creative", on_click=update_creative, type="primary")
+    st.header("3. Run the Update")
+    st.button("Process Bulk Update", on_click=process_bulk_update, type="primary")
