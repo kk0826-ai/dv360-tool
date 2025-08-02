@@ -193,28 +193,34 @@ if creds:
                     edited_df = pd.read_excel(edited_file).fillna('')
                     original_df = st.session_state.processed_df.fillna('')
 
-                    # --- New, Intelligent Validation Logic ---
-                    # Create a unique key for each tracker
-                    original_df['key'] = original_df['creative_id'].astype(str) + original_df['event_type'] + original_df['existing_url']
-                    edited_df['key'] = edited_df['creative_id'].astype(str) + edited_df['event_type'] + edited_df['existing_url']
-                    
-                    # Find what was deleted
-                    deleted_rows = original_df[~original_df['key'].isin(edited_df['key'])]
-                    
-                    # Find what was added (new rows have no existing_url)
-                    added_rows = edited_df[edited_df['existing_url'] == '']
-                    
-                    # Find what was updated (existed before, has a new_url now)
-                    updated_rows = edited_df[
-                        (edited_df['key'].isin(original_df['key'])) & 
-                        (edited_df['new_url'] != '')
-                    ]
+                    # --- GUARDRAIL 1: "No Changes Detected" ---
+                    if original_df.equals(edited_df):
+                        st.warning("⚠️ No changes were detected in the uploaded file.")
+                        st.stop()
 
+                    # --- GUARDRAIL 2: More Specific Validation ---
+                    original_ids = set(original_df['creative_id'].astype(str))
+                    edited_ids = set(edited_df['creative_id'].astype(str))
+                    if not edited_ids.issubset(original_ids):
+                        st.error("Error: The uploaded file contains Creative IDs that were not in the original export. Please check for errors.")
+                        st.stop()
+
+                    # --- GUARDRAIL 3: Detailed Review Summary ---
                     st.subheader("Review Your Planned Changes")
                     st.info("✅ Your file has been validated successfully.")
-                    st.write(f"🔵 **TO BE UPDATED:** {len(updated_rows)} trackers.")
-                    st.write(f"🟢 **TO BE ADDED:** {len(added_rows)} new trackers.")
-                    st.write(f"🔴 **TO BE DELETED:** {len(deleted_rows)} trackers.")
+                    
+                    # Create unique keys for comparison
+                    original_df['key'] = original_df['creative_id'].astype(str) + original_df['event_type']
+                    edited_df['key'] = edited_df['creative_id'].astype(str) + edited_df['event_type']
+                    
+                    deleted_keys = set(original_df['key']) - set(edited_df['key'])
+                    added_keys = set(edited_df['key']) - set(original_df['key'])
+                    
+                    st.write(f"🟢 **TO BE ADDED:** {len(added_keys)} new trackers.")
+                    st.write(f"🔴 **TO BE DELETED:** {len(deleted_keys)} trackers.")
+
+                    # Logic to find updates (more complex, simplified for now)
+                    st.write(f"🔵 **UPDATES & KEPT:** The final state will have {len(edited_df)} trackers.")
                     
                     st.session_state.update_plan = edited_df
             except Exception as e:
@@ -228,7 +234,7 @@ if creds:
         
         if st.button("Confirm and Send to DV360", type="primary"):
             try:
-                with st.spinner("Sending updates to the DV3G0 API..."):
+                with st.spinner("Sending updates to the DV360 API..."):
                     plan_df = st.session_state.update_plan
                     service = build('displayvideo', 'v3', credentials=creds)
 
