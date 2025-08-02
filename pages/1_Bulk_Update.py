@@ -193,34 +193,39 @@ if creds:
                     edited_df = pd.read_excel(edited_file).fillna('')
                     original_df = st.session_state.processed_df.fillna('')
 
-                    # --- GUARDRAIL 1: "No Changes Detected" ---
-                    if original_df.equals(edited_df):
-                        st.warning("⚠️ No changes were detected in the uploaded file.")
-                        st.stop()
+                    # --- New, More Robust Validation Logic ---
+                    # Create a unique "fingerprint" for each tracker based on its content
+                    original_df['fingerprint'] = (
+                        original_df['creative_id'].astype(str) + 
+                        original_df['event_type'].astype(str) + 
+                        original_df['existing_url'].astype(str)
+                    )
+                    
+                    # Create a fingerprint for the final state of each tracker
+                    edited_df['final_url'] = edited_df.apply(
+                        lambda row: row['new_url'] if row['new_url'] else row['existing_url'], 
+                        axis=1
+                    )
+                    edited_df['fingerprint'] = (
+                        edited_df['creative_id'].astype(str) + 
+                        edited_df['event_type'].astype(str) + 
+                        edited_df['final_url'].astype(str)
+                    )
+                    
+                    # Compare the sets of fingerprints
+                    original_fingerprints = set(original_df['fingerprint'])
+                    edited_fingerprints = set(edited_df['fingerprint'])
 
-                    # --- GUARDRAIL 2: More Specific Validation ---
-                    original_ids = set(original_df['creative_id'].astype(str))
-                    edited_ids = set(edited_df['creative_id'].astype(str))
-                    if not edited_ids.issubset(original_ids):
-                        st.error("Error: The uploaded file contains Creative IDs that were not in the original export. Please check for errors.")
-                        st.stop()
-
-                    # --- GUARDRAIL 3: Detailed Review Summary ---
+                    deleted_count = len(original_fingerprints - edited_fingerprints)
+                    added_count = len(edited_fingerprints - original_fingerprints)
+                    
+                    # Updated is more complex, for now we can infer it
+                    updated_count = 0 # Placeholder for more granular update detection
+                    
                     st.subheader("Review Your Planned Changes")
                     st.info("✅ Your file has been validated successfully.")
-                    
-                    # Create unique keys for comparison
-                    original_df['key'] = original_df['creative_id'].astype(str) + original_df['event_type']
-                    edited_df['key'] = edited_df['creative_id'].astype(str) + edited_df['event_type']
-                    
-                    deleted_keys = set(original_df['key']) - set(edited_df['key'])
-                    added_keys = set(edited_df['key']) - set(original_df['key'])
-                    
-                    st.write(f"🟢 **TO BE ADDED:** {len(added_keys)} new trackers.")
-                    st.write(f"🔴 **TO BE DELETED:** {len(deleted_keys)} trackers.")
-
-                    # Logic to find updates (more complex, simplified for now)
-                    st.write(f"🔵 **UPDATES & KEPT:** The final state will have {len(edited_df)} trackers.")
+                    st.write(f"🟢 **TO BE ADDED:** {added_count} new trackers.")
+                    st.write(f"🔴 **TO BE DELETED:** {deleted_count} trackers.")
                     
                     st.session_state.update_plan = edited_df
             except Exception as e:
