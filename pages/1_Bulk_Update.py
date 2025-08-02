@@ -91,15 +91,12 @@ if creds:
 
     # --- Phase 1: Uploader ---
     st.header("Phase 1: Upload Creative IDs")
-    advertiser_id = st.text_input("Enter the Advertiser ID for all creatives")
+    advertiser_id_input = st.text_input("Enter the Advertiser ID for all creatives")
     uploaded_ids_file = st.file_uploader("Upload a one-column CSV with your Creative IDs", type="csv")
 
     if st.button("Process IDs and Show Results"):
-        if uploaded_ids_file and advertiser_id:
+        if uploaded_ids_file and advertiser_id_input:
             try:
-                # Store advertiser_id for later use
-                st.session_state.advertiser_id = advertiser_id
-                
                 raw_text = uploaded_ids_file.getvalue().decode('utf-8')
                 lines = raw_text.splitlines()
                 creative_ids = [line.strip() for line in lines if line.strip() and line.strip().lower() != 'creative_id']
@@ -114,7 +111,7 @@ if creds:
                     with st.spinner(f"Fetching data for {len(creative_ids)} creatives..."):
                         progress_bar = st.progress(0)
                         for i, creative_id in enumerate(creative_ids):
-                            details = fetch_creative_details(service, advertiser_id, creative_id)
+                            details = fetch_creative_details(service, advertiser_id_input, creative_id)
                             individual_results_list.append(details)
                             
                             if details:
@@ -127,6 +124,7 @@ if creds:
                                         api_type = tracker.get('type')
                                         event_type = reverse_map.get(api_type, api_type)
                                         all_trackers_data.append({
+                                            "advertiser_id": advertiser_id_input,
                                             "creative_id": creative_id,
                                             "creative_name": creative_name,
                                             "event_type": event_type,
@@ -135,6 +133,7 @@ if creds:
                                         })
                                 else:
                                     all_trackers_data.append({
+                                        "advertiser_id": advertiser_id_input,
                                         "creative_id": creative_id,
                                         "creative_name": creative_name,
                                         "event_type": "",
@@ -164,7 +163,12 @@ if creds:
                     trackers = creative_data.get("thirdPartyUrls", [])
                     if trackers:
                         # Correctly display a clean table inside the expander
-                        display_df = pd.DataFrame(trackers)
+                        reverse_map = {v: k for k, v in TRACKER_MAP_HOSTED_VIDEO.items()}
+                        display_data = [
+                            {"event_type": reverse_map.get(t.get('type'), t.get('type')), "url": t.get('url')}
+                            for t in trackers
+                        ]
+                        display_df = pd.DataFrame(display_data)
                         st.dataframe(display_df)
                     else:
                         st.write("No third-party trackers found.")
@@ -190,13 +194,10 @@ if creds:
                     edited_df = pd.read_excel(edited_file)
                     original_df = st.session_state.processed_df
 
-                    # --- Validation Logic ---
-                    required_cols = {'creative_id', 'event_type', 'existing_url', 'new_url'}
+                    required_cols = {'advertiser_id', 'creative_id', 'event_type', 'existing_url', 'new_url'}
                     if not required_cols.issubset(edited_df.columns):
                         st.error(f"File is missing required columns. It must contain: {', '.join(required_cols)}")
                     else:
-                        # --- Comparison Logic ---
-                        # For simplicity, we'll just count rows. A real tool would compare cell by cell.
                         original_rows = len(original_df)
                         edited_rows = len(edited_df)
                         
@@ -205,7 +206,7 @@ if creds:
                         st.write(f"🔵 **UPDATED/KEPT:** {edited_rows} trackers will be set on the creatives.")
                         st.write(f"🔴 **DELETED:** {original_rows - edited_rows} trackers will be removed (if rows were deleted).")
                         
-                        st.session_state.update_plan = edited_df # Save the validated plan
+                        st.session_state.update_plan = edited_df
             except Exception as e:
                 st.error(f"An error occurred during validation: {e}")
 
@@ -220,21 +221,20 @@ if creds:
                 with st.spinner("Sending updates to the DV360 API..."):
                     plan_df = st.session_state.update_plan
                     service = build('displayvideo', 'v3', credentials=creds)
-                    advertiser_id = st.session_state.advertiser_id
 
                     # Group by creative to send one update per creative
                     for creative_id, group in plan_df.groupby('creative_id'):
                         final_trackers = []
+                        # Get the advertiser_id from the first row of the group
+                        adv_id = group['advertiser_id'].iloc[0]
                         for _, row in group.iterrows():
                             url_to_use = row['new_url'] if pd.notna(row['new_url']) and str(row['new_url']).strip() else row['existing_url']
                             if pd.notna(row['event_type']) and pd.notna(url_to_use):
-                                # Convert friendly name back to API name
                                 api_type = TRACKER_MAP_HOSTED_VIDEO.get(row['event_type'], row['event_type'])
                                 final_trackers.append({"type": api_type, "url": str(url_to_use)})
                         
-                        # Send the patch request
                         service.advertisers().creatives().patch(
-                            advertiserId=advertiser_id,
+                            advertiserId=str(adv_id),
                             creativeId=str(creative_id),
                             updateMask="thirdPartyUrls",
                             body={"thirdPartyUrls": final_trackers}
