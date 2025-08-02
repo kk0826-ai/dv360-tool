@@ -138,25 +138,45 @@ def load_existing_trackers():
         st.error(f"Error loading creative: {e}")
 
 def update_creative():
-    # The update function now reads the final state from the editor key
     if "tracker_table" not in st.session_state:
         st.error("No tracker data to update. Please load trackers first.")
         return
+
     try:
         with st.spinner("Updating creative..."):
-            # Convert the final state of the editor to a DataFrame
-            edited_df = pd.DataFrame(st.session_state.tracker_table)
-            
+            # Safely normalize the tracker table data
+            raw_data = st.session_state.tracker_table
+            normalized_data = [
+                {
+                    "event_type": row.get("event_type", ""),
+                    "existing_url": row.get("existing_url", ""),
+                    "new_url": row.get("new_url", "")
+                }
+                for row in raw_data if isinstance(row, dict)
+            ]
+
+            edited_df = pd.DataFrame(normalized_data)
+
             final_trackers = []
             tracker_map = st.session_state.tracker_map
 
             for _, row in edited_df.iterrows():
                 event_type_val = row['event_type']
                 url_to_use = row['new_url'].strip() if pd.notna(row['new_url']) and row['new_url'].strip() else row['existing_url']
-                
+
                 if pd.notna(event_type_val) and pd.notna(url_to_use) and url_to_use:
                     api_type = tracker_map.get(event_type_val, event_type_val)
-                    final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
+                    final_trackers.append({
+                        "type": api_type,
+                        "url": str(url_to_use).strip()
+                    })
+
+            if not final_trackers:
+                st.warning("No valid trackers to update.")
+                return
+
+            # Optional: Show payload for debugging
+            st.write("Final Trackers Payload:", final_trackers)
 
             service = build('displayvideo', 'v3', credentials=st.session_state.creds)
             service.advertisers().creatives().patch(
@@ -171,7 +191,6 @@ def update_creative():
 
     except Exception as e:
         st.error(f"An error occurred while updating: {e}")
-
 
 # --- Main UI ---
 SCOPES = ['https://www.googleapis.com/auth/display-video']
@@ -226,3 +245,4 @@ if st.session_state.creds:
             key="tracker_table"
         )
         st.button("Update Creative", on_click=update_creative, type="primary")
+
