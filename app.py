@@ -49,6 +49,7 @@ TRACKER_MAP_HOSTED_VIDEO = {
     "Complete": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_COMPLETE",
 }
 
+
 # --- Functions ---
 def detect_tracker_map(creative_data):
     creative_type = creative_data.get("creativeType")
@@ -137,40 +138,54 @@ def load_existing_trackers():
         st.error(f"Error loading creative: {e}")
 
 def update_creative():
-    if "tracker_table" not in st.session_state:
+    if "tracker_table" not in st.session_state or st.session_state.tracker_df is None:
         st.error("No tracker data to update. Please load trackers first.")
         return
-
     try:
-        # --- START DEBUGGING ---
-        # This will show us the exact data from the editor before any processing.
-        st.warning("--- DEBUGGING ---")
-        st.write("Data read directly from editor state:", st.session_state.tracker_table)
-        # --- END DEBUGGING ---
+        with st.spinner("Applying edits and updating creative..."):
+            # Start with the original, clean DataFrame
+            edited_df = st.session_state.tracker_df.copy()
+            # Get the delta object from the editor's state
+            delta = st.session_state.tracker_table
 
-        edited_df = pd.DataFrame(st.session_state.tracker_table)
-        
-        final_trackers = []
-        tracker_map = st.session_state.tracker_map
+            # --- Apply Deltas to Reconstruct the Final DataFrame ---
+            # 1. Apply Edits
+            for row_idx, changes in delta.get("edited_rows", {}).items():
+                for col_name, new_value in changes.items():
+                    edited_df.loc[int(row_idx), col_name] = new_value
 
-        for _, row in edited_df.iterrows():
-            event_type_val = row['event_type']
-            url_to_use = row['new_url'].strip() if pd.notna(row['new_url']) and row['new_url'].strip() else row['existing_url']
-            
-            if pd.notna(event_type_val) and pd.notna(url_to_use) and url_to_use:
-                api_type = tracker_map.get(event_type_val, event_type_val)
-                final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
-        
-        if not final_trackers:
-            st.warning("No valid trackers to update.")
-            return
+            # 2. Apply Deletions
+            if delta.get("deleted_rows"):
+                edited_df = edited_df.drop(index=delta["deleted_rows"]).reset_index(drop=True)
 
-        # The actual update is commented out during debugging
-        st.info("Update function is in debug mode. No changes were sent to the API.")
-        # service = build('displayvideo', 'v3', credentials=st..session_state.creds)
-        # service.advertisers().creatives().patch(...).execute()
-        # st.success("✅ Creative updated successfully!")
-        # load_existing_trackers()
+            # 3. Apply Additions
+            if delta.get("added_rows"):
+                added_df = pd.DataFrame(delta["added_rows"], columns=edited_df.columns)
+                edited_df = pd.concat([edited_df, added_df], ignore_index=True)
+
+            # --- Now process the reconstructed, clean DataFrame ---
+            final_trackers = []
+            tracker_map = st.session_state.tracker_map
+
+            for _, row in edited_df.iterrows():
+                event_type_val = row['event_type']
+                url_to_use = row['new_url'].strip() if pd.notna(row['new_url']) and row['new_url'].strip() else row['existing_url']
+                
+                if pd.notna(event_type_val) and pd.notna(url_to_use) and url_to_use:
+                    api_type = tracker_map.get(event_type_val, event_type_val)
+                    final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
+
+            # Send the update to the API
+            service = build('displayvideo', 'v3', credentials=st.session_state.creds)
+            service.advertisers().creatives().patch(
+                advertiserId=st.session_state.adv_single,
+                creativeId=st.session_state.creative_single,
+                updateMask="thirdPartyUrls",
+                body={"thirdPartyUrls": final_trackers}
+            ).execute()
+
+            st.success("✅ Creative updated successfully!")
+            load_existing_trackers()
 
     except Exception as e:
         st.error(f"An error occurred while updating: {e}")
