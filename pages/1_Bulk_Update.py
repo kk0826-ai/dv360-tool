@@ -193,39 +193,33 @@ if creds:
                     edited_df = pd.read_excel(edited_file).fillna('')
                     original_df = st.session_state.processed_df.fillna('')
 
-                    # --- New, More Robust Validation Logic ---
-                    # Create a unique "fingerprint" for each tracker based on its content
-                    original_df['fingerprint'] = (
-                        original_df['creative_id'].astype(str) + 
-                        original_df['event_type'].astype(str) + 
-                        original_df['existing_url'].astype(str)
-                    )
+                    # --- New, More Accurate Validation Logic ---
+                    # Create a unique key for each tracker based on creative and event type
+                    original_df['key'] = original_df['creative_id'].astype(str) + " | " + original_df['event_type']
+                    edited_df['key'] = edited_df['creative_id'].astype(str) + " | " + edited_df['event_type']
                     
-                    # Create a fingerprint for the final state of each tracker
-                    edited_df['final_url'] = edited_df.apply(
-                        lambda row: row['new_url'] if row['new_url'] else row['existing_url'], 
-                        axis=1
-                    )
-                    edited_df['fingerprint'] = (
-                        edited_df['creative_id'].astype(str) + 
-                        edited_df['event_type'].astype(str) + 
-                        edited_df['final_url'].astype(str)
-                    )
+                    # Convert to sets for easy comparison
+                    original_keys = set(original_df['key'])
+                    edited_keys = set(edited_df['key'])
                     
-                    # Compare the sets of fingerprints
-                    original_fingerprints = set(original_df['fingerprint'])
-                    edited_fingerprints = set(edited_df['fingerprint'])
-
-                    deleted_count = len(original_fingerprints - edited_fingerprints)
-                    added_count = len(edited_fingerprints - original_fingerprints)
+                    # Calculate additions and deletions
+                    added_keys = edited_keys - original_keys
+                    deleted_keys = original_keys - edited_keys
                     
-                    # Updated is more complex, for now we can infer it
-                    updated_count = 0 # Placeholder for more granular update detection
+                    # Calculate updates
+                    common_keys = original_keys.intersection(edited_keys)
+                    updated_count = 0
+                    for key in common_keys:
+                        original_url = original_df.loc[original_df['key'] == key, 'existing_url'].iloc[0]
+                        edited_url = edited_df.loc[edited_df['key'] == key, 'new_url'].iloc[0]
+                        if edited_url and edited_url != original_url:
+                            updated_count += 1
                     
                     st.subheader("Review Your Planned Changes")
                     st.info("✅ Your file has been validated successfully.")
-                    st.write(f"🟢 **TO BE ADDED:** {added_count} new trackers.")
-                    st.write(f"🔴 **TO BE DELETED:** {deleted_count} trackers.")
+                    st.write(f"🔵 **TO BE UPDATED:** {updated_count} trackers.")
+                    st.write(f"🟢 **TO BE ADDED:** {len(added_keys)} new trackers.")
+                    st.write(f"🔴 **TO BE DELETED:** {len(deleted_keys)} trackers.")
                     
                     st.session_state.update_plan = edited_df
             except Exception as e:
