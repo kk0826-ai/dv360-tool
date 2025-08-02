@@ -49,7 +49,6 @@ TRACKER_MAP_HOSTED_VIDEO = {
     "Complete": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_COMPLETE",
 }
 
-
 # --- Functions ---
 def detect_tracker_map(creative_data):
     creative_type = creative_data.get("creativeType")
@@ -60,7 +59,7 @@ def detect_tracker_map(creative_data):
             return TRACKER_MAP_HOSTED_VIDEO
         else:
             return TRACKER_MAP_VAST_VIDEO
-
+            
     return TRACKER_MAP_STANDARD
 
 def get_creds():
@@ -115,7 +114,7 @@ def load_existing_trackers():
             st.session_state.tracker_map = detect_tracker_map(creative)
             reverse_map = {v: k for k, v in st.session_state.tracker_map.items()}
             trackers = creative.get("thirdPartyUrls", [])
-
+            
             processed_trackers = []
             if trackers:
                 for tracker in trackers:
@@ -125,7 +124,7 @@ def load_existing_trackers():
                         'event_type': event_type,
                         'existing_url': tracker.get('url', '')
                     })
-
+            
             df = pd.DataFrame(processed_trackers)
             if df.empty:
                 df = pd.DataFrame(columns=['event_type', 'existing_url'])
@@ -141,33 +140,37 @@ def update_creative():
     if "tracker_table" not in st.session_state:
         st.error("No tracker data to update. Please load trackers first.")
         return
+
     try:
-        with st.spinner("Updating creative..."):
-            # The edited data from st.data_editor is a list of dictionaries.
-            # We iterate over it directly to avoid Pandas conversion errors.
-            edited_data = st.session_state.tracker_table
-            final_trackers = []
-            tracker_map = st.session_state.tracker_map
+        # --- START DEBUGGING ---
+        # This will show us the exact data from the editor before any processing.
+        st.warning("--- DEBUGGING ---")
+        st.write("Data read directly from editor state:", st.session_state.tracker_table)
+        # --- END DEBUGGING ---
 
-            for row in edited_data:
-                event_type_val = row['event_type']
-                url_to_use = row['new_url'].strip() if row['new_url'] and str(row['new_url']).strip() else row['existing_url']
+        edited_df = pd.DataFrame(st.session_state.tracker_table)
+        
+        final_trackers = []
+        tracker_map = st.session_state.tracker_map
 
-                if event_type_val and url_to_use:
-                    api_type = tracker_map.get(event_type_val, event_type_val)
-                    final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
+        for _, row in edited_df.iterrows():
+            event_type_val = row['event_type']
+            url_to_use = row['new_url'].strip() if pd.notna(row['new_url']) and row['new_url'].strip() else row['existing_url']
+            
+            if pd.notna(event_type_val) and pd.notna(url_to_use) and url_to_use:
+                api_type = tracker_map.get(event_type_val, event_type_val)
+                final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
+        
+        if not final_trackers:
+            st.warning("No valid trackers to update.")
+            return
 
-            # Send the update to the API
-            service = build('displayvideo', 'v3', credentials=st.session_state.creds)
-            service.advertisers().creatives().patch(
-                advertiserId=st.session_state.adv_single,
-                creativeId=st.session_state.creative_single,
-                updateMask="thirdPartyUrls",
-                body={"thirdPartyUrls": final_trackers}
-            ).execute()
-
-            st.success("✅ Creative updated successfully!")
-            load_existing_trackers()
+        # The actual update is commented out during debugging
+        st.info("Update function is in debug mode. No changes were sent to the API.")
+        # service = build('displayvideo', 'v3', credentials=st..session_state.creds)
+        # service.advertisers().creatives().patch(...).execute()
+        # st.success("✅ Creative updated successfully!")
+        # load_existing_trackers()
 
     except Exception as e:
         st.error(f"An error occurred while updating: {e}")
@@ -176,7 +179,6 @@ def update_creative():
 # --- Main UI ---
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
-# Initialize session state keys
 if "tracker_df" not in st.session_state:
     st.session_state.tracker_df = None
 if "adv_single" not in st.session_state:
@@ -199,10 +201,10 @@ if st.session_state.creds:
     if st.session_state.tracker_df is not None:
         st.subheader("Edit Trackers")
         st.info("Edit the 'new_url' column, add/delete rows, then click Update.")
-
+        
         current_map = st.session_state.get("tracker_map", TRACKER_MAP_STANDARD)
         event_options = list(current_map.keys())
-
+        
         st.data_editor(
             st.session_state.tracker_df,
             num_rows="dynamic",
