@@ -15,26 +15,70 @@ st.set_page_config(
 
 st.title("DV360 Creative Updater")
 
-# --- Maps (will be corrected after getting debug data) ---
+# --- Correct and Final Tracker Type Maps ---
 TRACKER_MAP_STANDARD = {
     "Impression": "THIRD_PARTY_URL_TYPE_IMPRESSION",
     "Click tracking": "THIRD_PARTY_URL_TYPE_CLICK_TRACKING",
 }
-TRACKER_MAP_VIDEO = {
+
+# For VAST Video Creatives
+TRACKER_MAP_VAST_VIDEO = {
     "Impression": "THIRD_PARTY_URL_TYPE_VAST_IMPRESSION",
     "Click tracking": "THIRD_PARTY_URL_TYPE_VAST_CLICK_TRACKING",
     "Start": "THIRD_PARTY_URL_TYPE_VAST_START",
+    "First quartile": "THIRD_PARTY_URL_TYPE_VAST_FIRST_QUARTILE",
+    "Midpoint": "THIRD_PARTY_URL_TYPE_VAST_MIDPOINT",
+    "Third quartile": "THIRD_PARTY_URL_TYPE_VAST_THIRD_QUARTILE",
+    "Complete": "THIRD_PARTY_URL_TYPE_VAST_COMPLETE",
+    "Mute": "THIRD_PARTY_URL_TYPE_VAST_MUTE",
+    "Pause": "THIRD_PARTY_URL_TYPE_VAST_PAUSE",
+    "Rewind": "THIRD_PARTY_URL_TYPE_VAST_REWIND",
+    "Fullscreen": "THIRD_PARTY_URL_TYPE_VAST_FULLSCREEN",
+    "Stop": "THIRD_PARTY_URL_TYPE_VAST_STOP",
+    "Custom": "THIRD_PARTY_URL_TYPE_VAST_CUSTOM_CLICK",
+    "Skip": "THIRD_PARTY_URL_TYPE_VAST_SKIP",
+    "Progress": "THIRD_PARTY_URL_TYPE_VAST_PROGRESS"
 }
 
-# --- Functions ---
+# For Hosted Video Creatives (based on your provided data)
+TRACKER_MAP_HOSTED_VIDEO = {
+    "Impression": "THIRD_PARTY_URL_TYPE_IMPRESSION",
+    "Click tracking": "THIRD_PARTY_URL_TYPE_CLICK_TRACKING", # Assumed standard
+    "Start": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_START",
+    "First quartile": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_FIRST_QUARTILE",
+    "Midpoint": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_MIDPOINT",
+    "Third quartile": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_THIRD_QUARTILE",
+    "Complete": "THIRD_PARTY_URL_TYPE_AUDIO_VIDEO_COMPLETE",
+}
+
+
+# --- Updated function to detect creative type and assign the correct map ---
 def detect_tracker_map(creative_data):
-    creative_type = creative_data.get("creativeType", "")
+    creative_type = creative_data.get("creativeType")
+    hosting_source = creative_data.get("hostingSource")
+
     if creative_type == "CREATIVE_TYPE_VIDEO":
-        return TRACKER_MAP_VIDEO
+        if hosting_source == "HOSTING_SOURCE_HOSTED":
+            return TRACKER_MAP_HOSTED_VIDEO
+        else: # Assumes VAST for other video sources
+            return TRACKER_MAP_VAST_VIDEO
+            
+    # Default to the standard map for all other types
     return TRACKER_MAP_STANDARD
 
+# --- Session State Initialization ---
+for key, default in {
+    "editable_tracker_df": None,
+    "adv_single": "",
+    "creative_single": "",
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+# --- Auth ---
+SCOPES = ['https://www.googleapis.com/auth/display-video']
+
 def get_creds():
-    # This function is assumed to be working correctly.
     if 'creds' in st.session_state and st.session_state.creds and st.session_state.creds.valid:
         return st.session_state.creds
     if os.path.exists('token.json'):
@@ -47,7 +91,8 @@ def get_creds():
             st.warning(f"Could not load token.json: {e}. Please re-authenticate.")
 
     try:
-        client_config = { "web": st.secrets }
+        # Assumes secrets are in st.secrets for Streamlit Cloud deployment
+        client_config = st.secrets
         flow = InstalledAppFlow.from_client_config(
             client_config, SCOPES, redirect_uri='urn:ietf:wg:oauth:2.0:oob')
     except Exception as e:
@@ -71,6 +116,9 @@ def get_creds():
             st.error(f"Error fetching token: {e}")
     return None
 
+st.session_state.creds = get_creds()
+
+# --- Load existing creative trackers ---
 def load_existing_trackers():
     if not all([st.session_state.adv_single, st.session_state.creative_single]):
         st.error("Please enter both Advertiser and Creative ID.")
@@ -83,14 +131,6 @@ def load_existing_trackers():
                 creativeId=st.session_state.creative_single
             ).execute()
 
-            # --- DIAGNOSTIC STEP ---
-            # This will print the raw data to the screen.
-            st.subheader("Raw Creative Data from API")
-            st.info("Please copy the text in the box below and provide it for analysis.")
-            st.json(creative)
-            # --- END DIAGNOSTIC STEP ---
-
-            # The rest of the function will run as before.
             st.session_state.tracker_map = detect_tracker_map(creative)
             reverse_map = {v: k for k, v in st.session_state.tracker_map.items()}
             trackers = creative.get("thirdPartyUrls", [])
@@ -111,23 +151,45 @@ def load_existing_trackers():
 
             df['new_url'] = ""
             st.session_state.editable_tracker_df = df[['event_type', 'existing_url', 'new_url']]
+            st.success("Trackers loaded successfully.")
 
     except Exception as e:
         st.error(f"Error loading creative: {e}")
 
+# --- Update creative ---
 def update_creative():
-    # This function is disabled until we fix the loading issue.
-    st.error("Update function is disabled during diagnostics. Please provide the raw data first.")
+    if "tracker_table" not in st.session_state:
+        st.error("No tracker data to update. Please load trackers first.")
+        return
+    try:
+        with st.spinner("Updating creative..."):
+            edited_df = pd.DataFrame(st.session_state.tracker_table)
+            final_trackers = []
+            tracker_map = st.session_state.tracker_map
 
-# --- Main App ---
-SCOPES = ['https://www.googleapis.com/auth/display-video']
+            for _, row in edited_df.iterrows():
+                event_type_val = row['event_type']
+                url_to_use = row['new_url'].strip() if pd.notna(row['new_url']) and row['new_url'].strip() else row['existing_url']
+                
+                if pd.notna(event_type_val) and pd.notna(url_to_use) and url_to_use:
+                    api_type = tracker_map.get(event_type_val, event_type_val)
+                    final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
 
-for key, default in {"editable_tracker_df": None, "adv_single": "", "creative_single": ""}.items():
-    if key not in st.session_state:
-        st.session_state[key] = default
+            service = build('displayvideo', 'v3', credentials=st.session_state.creds)
+            service.advertisers().creatives().patch(
+                advertiserId=st.session_state.adv_single,
+                creativeId=st.session_state.creative_single,
+                updateMask="thirdPartyUrls",
+                body={"thirdPartyUrls": final_trackers}
+            ).execute()
 
-st.session_state.creds = get_creds()
+            st.success("✅ Creative updated successfully!")
+            load_existing_trackers()
 
+    except Exception as e:
+        st.error(f"An error occurred while updating: {e}")
+
+# --- Main UI ---
 if st.session_state.creds:
     st.header("Single Creative Update")
     col1, col2 = st.columns(2)
@@ -140,7 +202,12 @@ if st.session_state.creds:
 
     if st.session_state.editable_tracker_df is not None:
         st.subheader("Edit Trackers")
-        all_event_options = list(TRACKER_MAP_STANDARD.keys()) + list(TRACKER_MAP_VIDEO.keys())
+        st.info("Edit the 'new_url' column, add/delete rows, then click Update.")
+        
+        # Dynamically populate dropdown with relevant options
+        current_map = st.session_state.get("tracker_map", TRACKER_MAP_STANDARD)
+        event_options = list(current_map.keys())
+        
         st.data_editor(
             st.session_state.editable_tracker_df,
             num_rows="dynamic",
@@ -148,11 +215,17 @@ if st.session_state.creds:
             column_config={
                 "event_type": st.column_config.SelectboxColumn(
                     "Event Type",
-                    options=sorted(list(set(all_event_options))),
+                    help="Select the event type.",
+                    options=event_options,
                     required=True,
                 ),
-                 "existing_url": st.column_config.TextColumn("Existing URL", disabled=True,),
-                "new_url": st.column_config.TextColumn("New or Updated URL",),
+                 "existing_url": st.column_config.TextColumn(
+                    "Existing URL",
+                    disabled=True,
+                ),
+                "new_url": st.column_config.TextColumn(
+                    "New or Updated URL",
+                ),
             },
             key="tracker_table"
         )
