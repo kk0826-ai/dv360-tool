@@ -24,6 +24,7 @@ def mock_fetch_creative_details(creative_id):
         "333333": {"name": "Creative Three", "trackers": []},
         "444444": {"name": "Creative Four", "trackers": [{"type": "Impression", "url": "http://d.com"}, {"type": "Click tracking", "url": "http://e.com"}, {"type": "Complete", "url": "http://f.com"}]}
     }
+    # Ensure we look up the ID as a string, as it comes from the file.
     return mock_data.get(str(creative_id), {"name": f"Unknown Creative {creative_id}", "trackers": []})
 
 def generate_excel_file(df):
@@ -41,9 +42,11 @@ def generate_excel_file(df):
         current_creative_id = None
         use_grey = False
 
+        # Iterate through rows to apply colors, skipping the header (row 1)
         for row_num, row_data in enumerate(df.itertuples(index=False), start=2):
-            if row_data.creative_id != current_creative_id:
-                current_creative_id = row_data.creative_id
+            # Convert both to string for reliable comparison
+            if str(row_data.creative_id) != str(current_creative_id):
+                current_creative_id = str(row_data.creative_id)
                 use_grey = not use_grey
 
             if use_grey:
@@ -66,50 +69,54 @@ uploaded_ids_file = st.file_uploader("Upload a one-column CSV with your Creative
 if uploaded_ids_file:
     if st.button("Process IDs and Show Results"):
         try:
-            # --- CORRECTED CSV READING LOGIC ---
-            # This is more robust and will auto-detect the separator.
-            # It reads the file into a temporary buffer to avoid issues with the uploader.
-            file_buffer = BytesIO(uploaded_ids_file.getvalue())
-            id_df = pd.read_csv(file_buffer, sep=None, engine='python', header=None)
+            # --- SIMPLIFIED AND ROBUST CSV READING ---
+            # Read the file as raw text and split into lines. This avoids all parsing errors.
+            raw_text = uploaded_ids_file.getvalue().decode('utf-8')
+            lines = raw_text.splitlines()
             
-            creative_ids = id_df.iloc[:, 0].astype(str).tolist()
+            # Extract clean, non-empty IDs
+            creative_ids = []
+            for line in lines:
+                clean_line = line.strip()
+                # Skip empty lines or a potential header row
+                if clean_line and clean_line.lower() != 'creative_id':
+                    creative_ids.append(clean_line)
             
-            with st.spinner(f"Fetching data for {len(creative_ids)} creatives... This may take a while."):
-                all_trackers_data = []
-                progress_bar = st.progress(0)
-                for i, creative_id in enumerate(creative_ids):
-                    # Check if the value is a potential header
-                    if creative_id.lower() == 'creative_id':
-                        continue # Skip the header row
-
-                    details = mock_fetch_creative_details(creative_id)
-                    if details["trackers"]:
-                        for tracker in details["trackers"]:
+            if not creative_ids:
+                st.error("The uploaded file contains no valid Creative IDs.")
+            else:
+                with st.spinner(f"Fetching data for {len(creative_ids)} creatives..."):
+                    all_trackers_data = []
+                    progress_bar = st.progress(0)
+                    for i, creative_id in enumerate(creative_ids):
+                        details = mock_fetch_creative_details(creative_id)
+                        if details["trackers"]:
+                            for tracker in details["trackers"]:
+                                all_trackers_data.append({
+                                    "creative_id": creative_id,
+                                    "creative_name": details["name"],
+                                    "event_type": tracker["type"],
+                                    "url": tracker["url"]
+                                })
+                        else: # Add a blank row for creatives with no trackers
                             all_trackers_data.append({
                                 "creative_id": creative_id,
                                 "creative_name": details["name"],
-                                "event_type": tracker["type"],
-                                "url": tracker["url"]
+                                "event_type": "",
+                                "url": ""
                             })
-                    else:
-                        all_trackers_data.append({
-                            "creative_id": creative_id,
-                            "creative_name": details["name"],
-                            "event_type": "",
-                            "url": ""
-                        })
-                    progress_bar.progress((i + 1) / len(creative_ids))
-            
-            st.session_state.processed_data = pd.DataFrame(all_trackers_data)
-            st.success("Data extraction complete. View the results below.")
+                        progress_bar.progress((i + 1) / len(creative_ids))
+                
+                st.session_state.processed_data = pd.DataFrame(all_trackers_data)
+                st.success("Data extraction complete. View the results below.")
 
         except Exception as e:
             st.error(f"An error occurred while processing the file: {e}")
 
 # --- Display Extracted Data and Provide Download ---
-if st.session_state.processed_data is not None:
+if st.session_state.processed_data is not None and not st.session_state.processed_data.empty:
     with st.expander("📝 View Extracted Trackers", expanded=True):
-        st.dataframe(st.session_state.processed_data)
+        st.dataframe(st.session_state.processed_data, use_container_width=True)
         
         excel_data = generate_excel_file(st.session_state.processed_data)
         
