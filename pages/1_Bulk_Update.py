@@ -193,33 +193,39 @@ if creds:
                     edited_df = pd.read_excel(edited_file).fillna('')
                     original_df = st.session_state.processed_df.fillna('')
 
-                    # --- New, More Accurate Validation Logic ---
-                    # Create a unique key for each tracker based on creative and event type
-                    original_df['key'] = original_df['creative_id'].astype(str) + " | " + original_df['event_type']
-                    edited_df['key'] = edited_df['creative_id'].astype(str) + " | " + edited_df['event_type']
-                    
-                    # Convert to sets for easy comparison
-                    original_keys = set(original_df['key'])
-                    edited_keys = set(edited_df['key'])
-                    
-                    # Calculate additions and deletions
-                    added_keys = edited_keys - original_keys
-                    deleted_keys = original_keys - edited_keys
-                    
-                    # Calculate updates
-                    common_keys = original_keys.intersection(edited_keys)
-                    updated_count = 0
-                    for key in common_keys:
-                        original_url = original_df.loc[original_df['key'] == key, 'existing_url'].iloc[0]
-                        edited_url = edited_df.loc[edited_df['key'] == key, 'new_url'].iloc[0]
-                        if edited_url and edited_url != original_url:
-                            updated_count += 1
-                    
                     st.subheader("Review Your Planned Changes")
-                    st.info("✅ Your file has been validated successfully.")
-                    st.write(f"🔵 **TO BE UPDATED:** {updated_count} trackers.")
-                    st.write(f"🟢 **TO BE ADDED:** {len(added_keys)} new trackers.")
-                    st.write(f"🔴 **TO BE DELETED:** {len(deleted_keys)} trackers.")
+                    st.info("✅ Your file has been validated successfully. Please review the planned changes for each creative below.")
+                    
+                    # --- New, Detailed, Creative-by-Creative Validation ---
+                    all_creative_ids = set(original_df['creative_id'].astype(str)) | set(edited_df['creative_id'].astype(str))
+
+                    for cid in sorted(list(all_creative_ids)):
+                        original_creative_df = original_df[original_df['creative_id'].astype(str) == cid]
+                        edited_creative_df = edited_df[edited_df['creative_id'].astype(str) == cid]
+                        
+                        original_trackers = set(original_creative_df['event_type'])
+                        edited_trackers = set(edited_creative_df['event_type'])
+
+                        added = edited_trackers - original_trackers
+                        deleted = original_trackers - edited_trackers
+                        
+                        # Find updates
+                        updated = []
+                        common_trackers = original_trackers.intersection(edited_trackers)
+                        for tracker_event in common_trackers:
+                            original_url = original_creative_df[original_creative_df['event_type'] == tracker_event]['existing_url'].iloc[0]
+                            edited_url = edited_creative_df[edited_creative_df['event_type'] == tracker_event]['new_url'].iloc[0]
+                            if edited_url and edited_url != original_url:
+                                updated.append(tracker_event)
+                        
+                        if added or deleted or updated:
+                            with st.expander(f"Changes for Creative ID: {cid}", expanded=True):
+                                if added:
+                                    st.write(f"🟢 **Added:** {', '.join(added)}")
+                                if deleted:
+                                    st.write(f"🔴 **Deleted:** {', '.join(deleted)}")
+                                if updated:
+                                    st.write(f"🔵 **Updated:** {', '.join(updated)}")
                     
                     st.session_state.update_plan = edited_df
             except Exception as e:
@@ -242,7 +248,7 @@ if creds:
                         adv_id = group['advertiser_id'].iloc[0]
                         for _, row in group.iterrows():
                             url_to_use = row['new_url'] if pd.notna(row['new_url']) and str(row['new_url']).strip() else row['existing_url']
-                            if pd.notna(row['event_type']) and pd.notna(url_to_use):
+                            if pd.notna(row['event_type']) and str(row['event_type']).strip():
                                 api_type = TRACKER_MAP_HOSTED_VIDEO.get(row['event_type'], row['event_type'])
                                 final_trackers.append({"type": api_type, "url": str(url_to_use)})
                         
