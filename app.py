@@ -10,11 +10,23 @@ st.title("DV360 Creative Updater")
 
 # --- Constants ---
 TRACKER_TYPE_MAP = {
-    "Impression": 1, "Click tracking": 14, "Start": 2, "First quartile": 3,
-    "Midpoint": 4, "Third quartile": 5, "Complete": 6, "Mute": 7,
-    "Pause": 8, "Rewind": 9, "Fullscreen": 10, "Stop": 11,
-    "Custom": 12, "Skip": 13, "Progress": 15
+    "Impression": 1,
+    "Click tracking": 2,  # ← UPDATE to match your observed UI
+    "Start": 3,
+    "First quartile": 4,
+    "Midpoint": 5,
+    "Third quartile": 6,
+    "Complete": 7,
+    "Mute": 8,
+    "Pause": 9,
+    "Rewind": 10,
+    "Fullscreen": 11,
+    "Stop": 12,
+    "Custom": 13,
+    "Skip": 14,
+    "Progress": 15
 }
+
 REVERSE_TRACKER_TYPE_MAP = {v: k for k, v in TRACKER_TYPE_MAP.items()}
 SCOPES = ['https://www.googleapis.com/auth/display-video']
 
