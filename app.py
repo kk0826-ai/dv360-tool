@@ -17,40 +17,24 @@ st.title("DV360 Creative Updater")
 
 # --- Tracker Type Maps ---
 TRACKER_MAP_STANDARD = {
-    "Impression": 1,
-    "Start": 2,
-    "First quartile": 3,
-    "Midpoint": 4,
-    "Third quartile": 5,
-    "Complete": 6,
-    "Mute": 7,
-    "Pause": 8,
-    "Rewind": 9,
-    "Fullscreen": 10,
-    "Stop": 11,
-    "Custom": 12,
-    "Skip": 13,
-    "Click tracking": 14,
-    "Progress": 15
+    "Impression": "THIRD_PARTY_URL_TYPE_IMPRESSION",
+    "Start": "THIRD_PARTY_URL_TYPE_START",
+    "First quartile": "THIRD_PARTY_URL_TYPE_FIRST_QUARTILE",
+    "Midpoint": "THIRD_PARTY_URL_TYPE_MIDPOINT",
+    "Third quartile": "THIRD_PARTY_URL_TYPE_THIRD_QUARTILE",
+    "Complete": "THIRD_PARTY_URL_TYPE_COMPLETE",
+    "Mute": "THIRD_PARTY_URL_TYPE_MUTE",
+    "Pause": "THIRD_PARTY_URL_TYPE_PAUSE",
+    "Rewind": "THIRD_PARTY_URL_TYPE_REWIND",
+    "Fullscreen": "THIRD_PARTY_URL_TYPE_FULLSCREEN",
+    "Stop": "THIRD_PARTY_URL_TYPE_STOP",
+    "Custom": "THIRD_PARTY_URL_TYPE_CUSTOM",
+    "Skip": "THIRD_PARTY_URL_TYPE_SKIP",
+    "Click tracking": "THIRD_PARTY_URL_TYPE_CLICK_TRACKING",
+    "Progress": "THIRD_PARTY_URL_TYPE_PROGRESS"
 }
 
-TRACKER_MAP_CUSTOM = {
-    "Impression": 1,
-    "Click tracking": 2,
-    "Start": 3,
-    "First quartile": 4,
-    "Midpoint": 5,
-    "Third quartile": 6,
-    "Complete": 7,
-    "Mute": 8,
-    "Pause": 9,
-    "Rewind": 10,
-    "Fullscreen": 11,
-    "Stop": 12,
-    "Custom": 13,
-    "Skip": 14,
-    "Progress": 15
-}
+TRACKER_MAP_CUSTOM = TRACKER_MAP_STANDARD  # Same values unless API says otherwise
 
 # --- Detect creative type and assign appropriate tracker map ---
 def detect_tracker_map(creative_data):
@@ -125,7 +109,6 @@ def load_existing_trackers():
         trackers = creative.get("thirdPartyUrls", [])
         df = pd.DataFrame(trackers)
         if not df.empty:
-            df['type'] = df['type'].astype(int)
             df['event_type'] = df['type'].map(reverse_map)
             df['existing_url'] = df['url']
 
