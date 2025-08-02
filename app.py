@@ -1,17 +1,43 @@
 import streamlit as st
 import os
+import google.auth.transport.requests
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+import json
 import pandas as pd
+from io import StringIO
 
-st.set_page_config(page_title="DV360 Creative Updater", page_icon="🔧", layout="wide")
+st.set_page_config(
+    page_title="DV360 Creative Updater",
+    page_icon="🔧",
+    layout="wide"
+)
+
 st.title("DV360 Creative Updater")
 
-# --- Constants ---
-TRACKER_TYPE_MAP = {
+# --- Tracker Type Maps ---
+TRACKER_MAP_STANDARD = {
     "Impression": 1,
-    "Click tracking": 2,  # ← UPDATE to match your observed UI
+    "Start": 2,
+    "First quartile": 3,
+    "Midpoint": 4,
+    "Third quartile": 5,
+    "Complete": 6,
+    "Mute": 7,
+    "Pause": 8,
+    "Rewind": 9,
+    "Fullscreen": 10,
+    "Stop": 11,
+    "Custom": 12,
+    "Skip": 13,
+    "Click tracking": 14,
+    "Progress": 15
+}
+
+TRACKER_MAP_CUSTOM = {
+    "Impression": 1,
+    "Click tracking": 2,  # Matches actual behavior in your DV360 UI
     "Start": 3,
     "First quartile": 4,
     "Midpoint": 5,
@@ -27,26 +53,39 @@ TRACKER_TYPE_MAP = {
     "Progress": 15
 }
 
-REVERSE_TRACKER_TYPE_MAP = {v: k for k, v in TRACKER_TYPE_MAP.items()}
-SCOPES = ['https://www.googleapis.com/auth/display-video']
+# --- Detect creative type and assign appropriate tracker map ---
+def detect_tracker_map(creative_data):
+    creative_type = creative_data.get("creativeType", "").lower()
+    if "video" in creative_type:
+        return TRACKER_MAP_CUSTOM
+    return TRACKER_MAP_STANDARD
 
-# --- Session State Defaults ---
-for k, v in {
+# --- Session State Initialization ---
+for key, default in {
     "staged_trackers": [],
     "adv_single": "",
     "creative_single": "",
     "urls_single": "",
     "tracker_type_single": "Impression",
-    "existing_trackers": []
+    "tracker_map": TRACKER_MAP_CUSTOM
 }.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-# --- Authentication ---
+# --- Callback to add trackers ---
+def add_trackers():
+    urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
+    tracker_num = st.session_state.tracker_map[st.session_state.tracker_type_single]
+    for url in urls:
+        st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
+    st.session_state.urls_single = ""
+
+# --- Auth ---
+SCOPES = ['https://www.googleapis.com/auth/display-video']
+
 def get_creds():
     if 'creds' in st.session_state and st.session_state.creds and st.session_state.creds.valid:
         return st.session_state.creds
-
     if os.path.exists('token.json'):
         try:
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
@@ -54,156 +93,116 @@ def get_creds():
                 st.session_state.creds = creds
                 return creds
         except Exception as e:
-            st.warning(f"Couldn't load saved credentials: {e}")
+            st.warning(f"Could not load token.json: {e}. Please re-authenticate.")
 
     try:
         client_config = st.secrets
-        flow = InstalledAppFlow.from_client_config(client_config, SCOPES, redirect_uri='urn:ietf:wg:oauth:2.0:oob')
+        flow = InstalledAppFlow.from_client_config(
+            client_config, SCOPES, redirect_uri='urn:ietf:wg:oauth:2.0:oob')
     except Exception as e:
-        st.error(f"Failed to load client secrets. Error: {e}")
+        st.error(f"Failed to load secrets. Error: {e}")
         return None
 
     auth_url, _ = flow.authorization_url(prompt='consent')
-    st.warning("Authorize the app by visiting this URL:")
+    st.warning("Please authorize this application by visiting the URL below:")
     st.code(auth_url)
-    auth_code = st.text_input("Paste the authorization code here:")
+    auth_code = st.text_input("Enter the authorization code here:")
     if st.button("Complete Authentication"):
         try:
             flow.fetch_token(code=auth_code)
             creds = flow.credentials
-            with open('token.json', 'w') as token_file:
-                token_file.write(creds.to_json())
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
             st.session_state.creds = creds
-            st.success("Authentication successful. Please refresh.")
+            st.success("Authentication successful! Please refresh the page.")
             st.rerun()
         except Exception as e:
-            st.error(f"Failed to complete auth: {e}")
+            st.error(f"Error fetching token: {e}")
     return None
 
 st.session_state.creds = get_creds()
 
-# --- Merge trackers preserving keys except replacing URL ---
-def merge_trackers(existing, staged):
-    staged_map = {}
-    for t in staged:
-        staged_map.setdefault(t["type"], []).append(t)
-
-    final = []
-    processed_types = set()
-
-    for tracker in existing:
-        ttype = tracker['type']
-        if ttype in staged_map:
-            # Replace URL only, keep other keys intact
-            for new_tracker in staged_map[ttype]:
-                new_tracker_full = tracker.copy()
-                new_tracker_full['url'] = new_tracker['url']
-                final.append(new_tracker_full)
-            processed_types.add(ttype)
-        else:
-            final.append(tracker)
-
-    # Add completely new types that don't exist yet
-    for ttype, trackers in staged_map.items():
-        if ttype not in processed_types:
-            final.extend(trackers)
-
-    return final
-
-# --- Add trackers to staged list ---
-def add_trackers():
-    urls = [url.strip() for url in st.session_state.urls_single.strip().split('\n') if url.strip()]
-    tracker_label = st.session_state.tracker_type_single
-    tracker_num = TRACKER_TYPE_MAP[tracker_label]
-
-    for url in urls:
-        st.session_state.staged_trackers.append({"type": tracker_num, "url": url})
-    st.session_state.urls_single = ""
-
-    st.write("🧪 You just added:", [{"type": tracker_num, "label": tracker_label, "url": url} for url in urls])
-    st.write("🧪 All staged trackers so far:", st.session_state.staged_trackers)
-
-# --- Load existing trackers from DV360 API ---
-def load_existing_trackers():
-    if not (st.session_state.adv_single and st.session_state.creative_single):
-        st.error("Enter Advertiser ID and Creative ID first.")
-        return
-    try:
-        service = build('displayvideo', 'v3', credentials=st.session_state.creds)
-        creative = service.advertisers().creatives().get(
-            advertiserId=st.session_state.adv_single,
-            creativeId=st.session_state.creative_single
-        ).execute()
-        st.session_state.existing_trackers = creative.get('thirdPartyUrls', [])
-        st.success(f"Loaded {len(st.session_state.existing_trackers)} existing trackers.")
-        st.write("Existing trackers from API:", st.session_state.existing_trackers)
-    except Exception as e:
-        st.error(f"Failed to fetch existing trackers: {e}")
-
-# --- Update creative with merged trackers ---
+# --- Update creative ---
 def update_creative():
-    if not (st.session_state.adv_single and st.session_state.creative_single and st.session_state.staged_trackers):
-        st.error("Advertiser ID, Creative ID, and at least one tracker are required.")
+    if not all([st.session_state.adv_single, st.session_state.creative_single, st.session_state.staged_trackers]):
+        st.error("Please provide Advertiser ID, Creative ID, and add at least one tracker.")
         return
 
     try:
-        service = build('displayvideo', 'v3', credentials=st.session_state.creds)
-        creative = service.advertisers().creatives().get(
-            advertiserId=st.session_state.adv_single,
-            creativeId=st.session_state.creative_single
-        ).execute()
+        with st.spinner("Fetching, merging, and updating trackers..."):
+            service = build('displayvideo', 'v3', credentials=st.session_state.creds)
+            adv_id = st.session_state.adv_single
+            creative_id = st.session_state.creative_single
 
-        merged = merge_trackers(creative.get("thirdPartyUrls", []), st.session_state.staged_trackers)
+            creative_data = service.advertisers().creatives().get(
+                advertiserId=adv_id, creativeId=creative_id).execute()
 
-        # Optional: sort for consistent ordering
-        merged.sort(key=lambda x: x['type'])
+            # Detect tracker map based on creative type
+            st.session_state.tracker_map = detect_tracker_map(creative_data)
+            tracker_map = st.session_state.tracker_map
+            reverse_map = {v: k for k, v in tracker_map.items()}
 
-        st.write("🔎 Final payload being sent:", merged)
+            existing = creative_data.get('thirdPartyUrls', [])
+            staged = st.session_state.staged_trackers
 
-        service.advertisers().creatives().patch(
-            advertiserId=st.session_state.adv_single,
-            creativeId=st.session_state.creative_single,
-            updateMask="thirdPartyUrls",
-            body={"thirdPartyUrls": merged}
-        ).execute()
+            # Create a final merged list
+            merged = []
+            types_seen = set()
+
+            # Replace or keep existing
+            for tracker in existing:
+                if tracker['type'] in [t['type'] for t in staged]:
+                    replacement = [t for t in staged if t['type'] == tracker['type']][0]
+                    merged.append(replacement)
+                    types_seen.add(tracker['type'])
+                else:
+                    merged.append(tracker)
+
+            # Add brand new ones
+            for tracker in staged:
+                if tracker['type'] not in types_seen:
+                    merged.append(tracker)
+
+            patch_body = {"thirdPartyUrls": merged}
+            service.advertisers().creatives().patch(
+                advertiserId=adv_id,
+                creativeId=creative_id,
+                updateMask="thirdPartyUrls",
+                body=patch_body
+            ).execute()
 
         st.success("✅ Creative updated successfully!")
         st.session_state.staged_trackers = []
-        st.session_state.adv_single = ""
-        st.session_state.creative_single = ""
     except Exception as e:
-        st.error(f"Error updating creative: {e}")
+        st.error(f"An error occurred: {e}")
 
-# --- UI ---
+# --- Main UI ---
 if st.session_state.creds:
-    single_tab, bulk_tab = st.tabs(["Single Creative Update", "Bulk Update via CSV"])
+    st.header("Single Creative Update")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.text_input("Advertiser ID", key="adv_single")
+    with col2:
+        st.text_input("Creative ID", key="creative_single")
 
-    with single_tab:
-        st.header("1. Enter Creative Info")
-        col1, col2 = st.columns(2)
-        col1.text_input("Advertiser ID", key="adv_single")
-        col2.text_input("Creative ID", key="creative_single")
+    st.header("Add Trackers")
+    col3, col4, col5 = st.columns([2, 3, 1])
+    with col3:
+        st.selectbox("Select Tracker Type", options=st.session_state.tracker_map.keys(), key="tracker_type_single")
+    with col4:
+        st.text_area("Enter URLs (one per line)", key="urls_single")
+    with col5:
+        st.button("Add to List", use_container_width=True, on_click=add_trackers, disabled=(not st.session_state.urls_single))
 
-        if st.button("Load Existing Trackers"):
-            load_existing_trackers()
+    if st.session_state.staged_trackers:
+        df = pd.DataFrame(st.session_state.staged_trackers)
+        df['type'] = df['type'].map({v: k for k, v in st.session_state.tracker_map.items()})
+        st.dataframe(df, use_container_width=True)
 
-        st.header("2. Add Third-Party Trackers")
-        c1, c2, c3 = st.columns([2, 3, 1])
-        c1.selectbox("Select Tracker Type", TRACKER_TYPE_MAP.keys(), key="tracker_type_single")
-        c2.text_area("Tracker URLs (one per line)", key="urls_single")
-        c3.button("Add to List", on_click=add_trackers, disabled=not st.session_state.urls_single)
-
-        if st.session_state.staged_trackers:
-            st.subheader("Trackers to Be Added")
-            df = pd.DataFrame(st.session_state.staged_trackers)
-            df["type_label"] = df["type"].map(REVERSE_TRACKER_TYPE_MAP)
-            st.dataframe(df[["type_label", "url"]], use_container_width=True)
-        else:
-            st.info("No trackers staged yet.")
-
-        st.header("3. Update Creative")
-        col6, col7 = st.columns([1, 3])
-        col6.button("Update Creative", type="primary", on_click=update_creative)
-        if col7.button("Clear"):
+    col6, col7 = st.columns([1, 3])
+    with col6:
+        st.button("Update Creative", type="primary", use_container_width=True, on_click=update_creative)
+    with col7:
+        if st.button("Clear List", use_container_width=True):
             st.session_state.staged_trackers = []
             st.rerun()
