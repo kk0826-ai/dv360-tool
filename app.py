@@ -137,32 +137,31 @@ def load_existing_trackers():
     except Exception as e:
         st.error(f"Error loading creative: {e}")
 
+# --- New Callback to save edits reliably ---
+def save_edits():
+    st.session_state.editable_tracker_df = pd.DataFrame(st.session_state.tracker_table)
+
+
 def update_creative():
-    if "tracker_table" not in st.session_state:
+    # The update function now reads from our clean "master copy" of the data
+    if st.session_state.editable_tracker_df is None:
         st.error("No tracker data to update. Please load trackers first.")
         return
     try:
         with st.spinner("Updating creative..."):
-            # Convert the edited data from the data_editor's state into a DataFrame.
-            # This is the most reliable way to handle the edited data.
-            edited_df = pd.DataFrame(st.session_state.tracker_table)
-            
+            # Read from the reliable DataFrame, not the editor's internal state
+            edited_df = st.session_state.editable_tracker_df
             final_trackers = []
             tracker_map = st.session_state.tracker_map
 
-            # Now, iterate over the rows of the clean DataFrame.
             for _, row in edited_df.iterrows():
                 event_type_val = row['event_type']
-                # Prioritize new URL, but fall back to existing if new is empty
                 url_to_use = row['new_url'].strip() if pd.notna(row['new_url']) and row['new_url'].strip() else row['existing_url']
                 
-                # Only include trackers that have a valid event type and a URL
                 if pd.notna(event_type_val) and pd.notna(url_to_use) and url_to_use:
-                    # If it's a known friendly name, convert it. Otherwise, use the raw value.
                     api_type = tracker_map.get(event_type_val, event_type_val)
                     final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
 
-            # Send the update to the API
             service = build('displayvideo', 'v3', credentials=st.session_state.creds)
             service.advertisers().creatives().patch(
                 advertiserId=st.session_state.adv_single,
@@ -172,7 +171,6 @@ def update_creative():
             ).execute()
 
             st.success("✅ Creative updated successfully!")
-            # Reload the trackers to show the updated state
             load_existing_trackers()
 
     except Exception as e:
@@ -200,9 +198,8 @@ if st.session_state.creds:
 
     if st.session_state.editable_tracker_df is not None:
         st.subheader("Edit Trackers")
-        st.info("Edit the 'new_url' column, add/delete rows, then click Update.")
+        st.info("Edit the table below. Your changes are saved automatically. Click 'Update Creative' when finished.")
         
-        # Dynamically populate dropdown with relevant options
         current_map = st.session_state.get("tracker_map", TRACKER_MAP_STANDARD)
         event_options = list(current_map.keys())
         
@@ -213,7 +210,6 @@ if st.session_state.creds:
             column_config={
                 "event_type": st.column_config.SelectboxColumn(
                     "Event Type",
-                    help="Select the event type.",
                     options=event_options,
                     required=True,
                 ),
@@ -225,6 +221,7 @@ if st.session_state.creds:
                     "New or Updated URL",
                 ),
             },
-            key="tracker_table"
+            key="tracker_table",
+            on_change=save_edits # Use the callback to save edits reliably
         )
         st.button("Update Creative", on_click=update_creative, type="primary")
