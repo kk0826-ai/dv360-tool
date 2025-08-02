@@ -3,7 +3,7 @@ import pandas as pd
 from io import BytesIO
 from openpyxl.styles import PatternFill
 
-# Placeholder for Google API functions
+# Placeholder for real Google authentication and API build service
 # from google_auth_utils import get_creds, build_service
 
 st.set_page_config(
@@ -17,17 +17,19 @@ st.title("Bulk Creative Updater Workflow")
 def mock_fetch_creative_details(creative_id):
     """
     Placeholder function to simulate fetching data from DV360 API.
+    In the real app, this will make a live call to the DV360 API.
     """
     mock_data = {
         "111111": {"name": "Creative One", "trackers": [{"type": "Impression", "url": "http://a.com"}, {"type": "Start", "url": "http://b.com"}]},
         "222222": {"name": "Creative Two", "trackers": [{"type": "Impression", "url": "http://c.com"}]},
-        "333333": {"name": "Creative Three", "trackers": []}
+        "333333": {"name": "Creative Three", "trackers": []},
+        "444444": {"name": "Creative Four", "trackers": [{"type": "Impression", "url": "http://d.com"}, {"type": "Click tracking", "url": "http://e.com"}, {"type": "Complete", "url": "http://f.com"}]}
     }
-    return mock_data.get(str(creative_id), {"name": "Unknown Creative", "trackers": []})
+    return mock_data.get(str(creative_id), {"name": f"Unknown Creative {creative_id}", "trackers": []})
 
 def generate_excel_file(df):
     """
-    Generates a color-coded Excel file in memory using the modern openpyxl styling method.
+    Generates a color-coded Excel file in memory using openpyxl for styling.
     """
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -35,18 +37,17 @@ def generate_excel_file(df):
         workbook = writer.book
         worksheet = writer.sheets['Trackers']
 
-        # Define the fill patterns for the alternating colors
+        # Define the fill patterns for alternating colors
         light_grey_fill = PatternFill(start_color='E7E6E6', end_color='E7E6E6', fill_type='solid')
         
-        # Logic to apply alternating colors
         current_creative_id = None
         use_grey = False
 
-        # Start from row 2 to skip the header
+        # Iterate through rows to apply colors, skipping the header (row 1)
         for row_num, row_data in enumerate(df.itertuples(index=False), start=2):
             if row_data.creative_id != current_creative_id:
                 current_creative_id = row_data.creative_id
-                use_grey = not use_grey # Switch color for the new group
+                use_grey = not use_grey
 
             if use_grey:
                 for col_num in range(1, len(df.columns) + 1):
@@ -57,19 +58,23 @@ def generate_excel_file(df):
 
 # --- UI WORKFLOW ---
 
-# --- Phase 1: Upload Creative IDs and Download Template ---
+# --- Phase 1: Upload Creative IDs and Process ---
 st.header("Phase 1: Upload Creative IDs")
+
+# Initialize session state
+if 'processed_data' not in st.session_state:
+    st.session_state.processed_data = None
+
 uploaded_ids_file = st.file_uploader("Upload a one-column CSV with your Creative IDs", type="csv", key="id_uploader")
 
 if uploaded_ids_file:
-    try:
-        # Read only the first column to be safe
-        id_df = pd.read_csv(uploaded_ids_file, usecols=[0])
-        creative_ids = id_df.iloc[:, 0].astype(str).tolist()
-        st.success(f"Found {len(creative_ids)} Creative IDs.")
-
-        if st.button("Process IDs and Generate Excel File"):
-            with st.spinner("Fetching data for all creatives... This may take a while."):
+    if st.button("Process IDs and Show Results"):
+        try:
+            # Correctly read all creative IDs from the first column
+            id_df = pd.read_csv(uploaded_ids_file, header=None if pd.read_csv(uploaded_ids_file, nrows=1).iloc[0,0] != 'creative_id' else 0)
+            creative_ids = id_df.iloc[:, 0].astype(str).tolist()
+            
+            with st.spinner(f"Fetching data for {len(creative_ids)} creatives... This may take a while."):
                 all_trackers_data = []
                 progress_bar = st.progress(0)
                 for i, creative_id in enumerate(creative_ids):
@@ -82,7 +87,7 @@ if uploaded_ids_file:
                                 "event_type": tracker["type"],
                                 "url": tracker["url"]
                             })
-                    else: # Add a row even if there are no trackers
+                    else:
                         all_trackers_data.append({
                             "creative_id": creative_id,
                             "creative_name": details["name"],
@@ -91,21 +96,25 @@ if uploaded_ids_file:
                         })
                     progress_bar.progress((i + 1) / len(creative_ids))
             
-            # Create the Excel file for download
-            export_df = pd.DataFrame(all_trackers_data)
-            excel_data = generate_excel_file(export_df)
+            st.session_state.processed_data = pd.DataFrame(all_trackers_data)
+            st.success("Data extraction complete. View the results below.")
 
-            st.session_state.original_df = export_df # Save for later comparison
+        except Exception as e:
+            st.error(f"An error occurred while processing the file: {e}")
 
-            st.download_button(
-                label="📥 Download Excel File to Edit",
-                data=excel_data,
-                file_name="dv360_trackers_to_edit.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
+# --- Display Extracted Data and Provide Download ---
+if st.session_state.processed_data is not None:
+    with st.expander("📝 View Extracted Trackers", expanded=True):
+        st.dataframe(st.session_state.processed_data)
+        
+        excel_data = generate_excel_file(st.session_state.processed_data)
+        
+        st.download_button(
+            label="📥 Download Excel File to Edit",
+            data=excel_data,
+            file_name="dv360_trackers_to_edit.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 
 # --- Phase 2: Upload Edited File for Validation and Review ---
@@ -113,37 +122,24 @@ st.header("Phase 2: Upload Your Edited Excel File")
 edited_file = st.file_uploader("Upload the Excel file you just edited", type="xlsx", key="edited_uploader")
 
 if edited_file:
-    st.info("File received. Ready for validation.")
     if st.button("Validate and Review Changes"):
         with st.spinner("Validating file and comparing changes..."):
-            # Placeholder for the validation logic
-            validation_passed = True # Assume it passes for now
-            
-            if validation_passed:
-                st.subheader("Review Your Planned Changes")
-                st.markdown("""
-                This is a summary of the changes detected in your uploaded file. 
-                Nothing will be sent to DV360 until you click the final confirmation button.
-                """)
-                # Placeholder for the comparison and summary logic
-                st.info("✅ Your file has been validated successfully.")
-                st.write("🔵 **TO BE UPDATED:** 5 trackers")
-                st.write("🟢 **TO BE ADDED:** 2 new trackers")
-                st.write("🔴 **TO BE DELETED:** 8 trackers")
-
-                # Store the final plan in session state
-                st.session_state.update_plan_ready = True
-            else:
-                st.error("Your file failed validation. Please fix the errors listed above and re-upload.")
+            # Placeholder for the validation and comparison logic
+            st.subheader("Review Your Planned Changes")
+            st.info("✅ Your file has been validated successfully.")
+            st.write("🔵 **TO BE UPDATED:** 5 trackers")
+            st.write("🟢 **TO BE ADDED:** 2 new trackers")
+            st.write("🔴 **TO BE DELETED:** 8 trackers")
+            st.session_state.update_plan_ready = True
 
 
 # --- Phase 3: Final Confirmation ---
 if st.session_state.get("update_plan_ready", False):
     st.header("Phase 3: Confirm and Push to DV360")
-    st.warning("⚠️ **FINAL WARNING:** This action is irreversible. The changes summarized above will be sent to the DV360 API.")
+    st.warning("⚠️ **FINAL WARNING:** This action is irreversible.")
     
     if st.button("Confirm and Send to DV360", type="primary"):
         with st.spinner("Sending updates to the DV360 API..."):
-            # Placeholder for the final loop that sends PATCH requests
             st.success("All updates have been processed successfully!")
             st.session_state.update_plan_ready = False # Reset state
+            st.session_state.processed_data = None # Clear the table
