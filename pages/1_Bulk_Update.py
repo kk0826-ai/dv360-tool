@@ -88,8 +88,6 @@ if creds:
         st.session_state.individual_results = None
     if 'update_plan' not in st.session_state:
         st.session_state.update_plan = None
-    if 'final_report_df' not in st.session_state:
-        st.session_state.final_report_df = None
 
 
     # --- Phase 1: Uploader ---
@@ -192,14 +190,17 @@ if creds:
                 with st.spinner("Validating file..."):
                     edited_df = pd.read_excel(edited_file).fillna('')
                     
+                    # --- Final Validation Logic ---
                     deletes = edited_df[edited_df['new_url'].str.lower() == 'delete']
                     adds = edited_df[edited_df['existing_url'] == '']
                     updates = edited_df[(edited_df['new_url'] != '') & (edited_df['new_url'].str.lower() != 'delete') & (edited_df['existing_url'] != '')]
+                    no_change = edited_df[(edited_df['new_url'] == '') & (edited_df['existing_url'] != '')]
 
                     st.subheader("Validation Complete")
                     st.write(f"🟢 **Trackers to be Added:** {len(adds)}")
                     st.write(f"🔴 **Trackers to be Deleted:** {len(deletes)}")
                     st.write(f"🔵 **Trackers to be Updated:** {len(updates)}")
+                    st.write(f"⚪ **Trackers with No Change:** {len(no_change)}")
                     
                     st.session_state.update_plan = edited_df
             except Exception as e:
