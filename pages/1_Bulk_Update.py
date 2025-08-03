@@ -70,8 +70,7 @@ def generate_excel_file(df, is_report=False):
         if is_report:
             added_fill = PatternFill(start_color='D6EFD6', end_color='D6EFD6', fill_type='solid') # Green
             deleted_fill = PatternFill(start_color='FFD6D6', end_color='FFD6D6', fill_type='solid') # Red
-            updated_fill = PatternFill(start_color='D6E8EF', end_color='D6E8EF', fill_type='solid') # Blue
-
+            
             for row_num, row_data in enumerate(df.itertuples(index=False), start=2):
                 status = getattr(row_data, 'status', '')
                 fill = None
@@ -79,8 +78,6 @@ def generate_excel_file(df, is_report=False):
                     fill = added_fill
                 elif status == 'DELETED':
                     fill = deleted_fill
-                elif status == 'UPDATED':
-                    fill = updated_fill
                 
                 if fill:
                     for col_num in range(1, len(df.columns) + 1):
@@ -120,7 +117,6 @@ if creds:
 
     if st.button("Process IDs and Show Results"):
         if uploaded_ids_file and advertiser_id_input:
-            # Main processing logic... (abridged for clarity)
             try:
                 raw_text = uploaded_ids_file.getvalue().decode('utf-8')
                 lines = raw_text.splitlines()
@@ -171,18 +167,37 @@ if creds:
                     st.session_state.processed_df = pd.DataFrame(all_trackers_data)
                     st.success("Data extraction complete.")
             except Exception as e:
-                st.error(f"An error occurred: {e}")
+                st.error(f"An error occurred while processing IDs: {e}")
         else:
             st.warning("Please provide an Advertiser ID and upload a file.")
 
     # --- Display Results and Global Download Button ---
     if st.session_state.get('individual_results'):
-        # Abridged for clarity
-        pass
+        st.header("Extracted Creative Details")
+        st.info("Click on each creative to view its trackers.")
+        for creative_data in st.session_state.individual_results:
+            if creative_data:
+                name = creative_data.get('displayName', 'N/A')
+                c_id = creative_data.get('creativeId', 'N/A')
+                with st.expander(f"Creative: {name} (ID: {c_id})"):
+                    trackers = creative_data.get("thirdPartyUrls", [])
+                    if trackers:
+                        reverse_map = {v: k for k, v in TRACKER_MAP_HOSTED_VIDEO.items()}
+                        display_data = [{"event_type": reverse_map.get(t.get('type'), t.get('type')), "url": t.get('url')} for t in trackers]
+                        st.dataframe(pd.DataFrame(display_data))
+                    else:
+                        st.write("No third-party trackers found.")
 
     if st.session_state.get('processed_df') is not None and not st.session_state.processed_df.empty:
-        # Abridged for clarity
-        pass
+        st.header("Download Combined File")
+        excel_data = generate_excel_file(st.session_state.processed_df)
+        st.download_button(
+            label="📥 Download Combined Excel File to Edit",
+            data=excel_data,
+            file_name="dv360_trackers_to_edit.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
 
     # --- Phase 2: Upload Edited File for Validation and Review ---
     st.header("Phase 2: Upload Your Edited Excel File")
@@ -205,12 +220,11 @@ if creds:
 
                     added_fingerprints = edited_fingerprints - original_fingerprints
                     deleted_fingerprints = original_fingerprints - original_fingerprints
-
+                    
                     # Simplified on-screen summary
                     st.subheader("Validation Complete")
                     st.write(f"🟢 **Trackers to be Added:** {len(added_fingerprints)}")
                     st.write(f"🔴 **Trackers to be Deleted:** {len(deleted_fingerprints)}")
-                    # A more detailed update count could be added here if needed
                     st.write("🔵 **URL Updates:** Will be applied as per the 'new_url' column.")
 
                     # Logic to generate the Add/Delete report if necessary
@@ -250,5 +264,32 @@ if creds:
         st.warning("⚠️ **FINAL WARNING:** This action is irreversible.")
         
         if st.button("Confirm and Send to DV360", type="primary"):
-            # Final update logic remains the same
-            pass # Abridged for clarity
+            try:
+                with st.spinner("Sending updates to the DV360 API..."):
+                    plan_df = st.session_state.update_plan
+                    service = build('displayvideo', 'v3', credentials=creds)
+
+                    for creative_id, group in plan_df.groupby('creative_id'):
+                        final_trackers = []
+                        adv_id = group['advertiser_id'].iloc[0]
+                        for _, row in group.iterrows():
+                            url_to_use = row['new_url'] if pd.notna(row['new_url']) and str(row['new_url']).strip() else row['existing_url']
+                            if pd.notna(row['event_type']) and str(row['event_type']).strip() and pd.notna(url_to_use) and str(url_to_use).strip():
+                                api_type = TRACKER_MAP_HOSTED_VIDEO.get(row['event_type'], row['event_type'])
+                                final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
+                        
+                        service.advertisers().creatives().patch(
+                            advertiserId=str(adv_id),
+                            creativeId=str(creative_id),
+                            updateMask="thirdPartyUrls",
+                            body={"thirdPartyUrls": final_trackers}
+                        ).execute()
+
+                    st.success("All updates have been processed successfully!")
+                    # Clear session state to reset the app
+                    for key in ['processed_df', 'individual_results', 'update_plan', 'add_delete_report_df']:
+                        if key in st.session_state:
+                            del st.session_state[key]
+
+            except Exception as e:
+                st.error(f"An error occurred during the final update: {e}")
