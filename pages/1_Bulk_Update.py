@@ -67,7 +67,6 @@ def generate_excel_file(df, is_report=False):
         
         light_grey_fill = PatternFill(start_color='E7E6E6', end_color='E7E6E6', fill_type='solid')
         
-        # New coloring for the final upload status report
         if is_report:
             failed_fill = PatternFill(start_color='FFD6D6', end_color='FFD6D6', fill_type='solid') # Red
 
@@ -76,7 +75,7 @@ def generate_excel_file(df, is_report=False):
                 if status == '❌ Failed':
                     for col_num in range(1, len(df.columns) + 1):
                         worksheet.cell(row=row_num, column=col_num).fill = failed_fill
-        else: # Standard alternating colors
+        else:
             current_creative_id = None
             use_grey = False
             for row_num, row_data in enumerate(df.itertuples(index=False), start=2):
@@ -94,7 +93,15 @@ creds = get_creds()
 
 if creds:
     # --- Initialize Session State ---
-    # Abridged for clarity
+    if 'processed_df' not in st.session_state:
+        st.session_state.processed_df = None
+    if 'individual_results' not in st.session_state:
+        st.session_state.individual_results = None
+    if 'update_plan' not in st.session_state:
+        st.session_state.update_plan = None
+    if 'final_upload_report' not in st.session_state:
+        st.session_state.final_upload_report = None
+
 
     # --- Phase 1: Uploader ---
     st.header("Phase 1: Upload Creative IDs")
@@ -103,17 +110,86 @@ if creds:
 
     if st.button("Process IDs and Show Results"):
         if uploaded_ids_file and advertiser_id_input:
-            # Main processing logic... (abridged for clarity)
-            pass
+            try:
+                raw_text = uploaded_ids_file.getvalue().decode('utf-8')
+                lines = raw_text.splitlines()
+                creative_ids = [line.strip() for line in lines if line.strip() and line.strip().lower() != 'creative_id']
+
+                if not creative_ids:
+                    st.error("The uploaded file contains no valid Creative IDs.")
+                else:
+                    service = build('displayvideo', 'v3', credentials=creds)
+                    all_trackers_data = []
+                    individual_results_list = []
+                    
+                    with st.spinner(f"Fetching data for {len(creative_ids)} creatives..."):
+                        progress_bar = st.progress(0)
+                        for i, creative_id in enumerate(creative_ids):
+                            details = fetch_creative_details(service, advertiser_id_input, creative_id)
+                            individual_results_list.append(details)
+                            
+                            if details:
+                                trackers = details.get("thirdPartyUrls", [])
+                                creative_name = details.get("displayName", "N/A")
+                                reverse_map = {v: k for k, v in TRACKER_MAP_HOSTED_VIDEO.items()}
+
+                                if trackers:
+                                    for tracker in trackers:
+                                        api_type = tracker.get('type')
+                                        event_type = reverse_map.get(api_type, api_type)
+                                        all_trackers_data.append({
+                                            "advertiser_id": advertiser_id_input,
+                                            "creative_id": creative_id,
+                                            "creative_name": creative_name,
+                                            "event_type": event_type,
+                                            "existing_url": tracker.get("url"),
+                                            "new_url": ""
+                                        })
+                                else:
+                                    all_trackers_data.append({
+                                        "advertiser_id": advertiser_id_input,
+                                        "creative_id": creative_id,
+                                        "creative_name": creative_name,
+                                        "event_type": "",
+                                        "existing_url": "",
+                                        "new_url": ""
+                                    })
+                            progress_bar.progress((i + 1) / len(creative_ids))
+                    
+                    st.session_state.individual_results = individual_results_list
+                    st.session_state.processed_df = pd.DataFrame(all_trackers_data)
+                    st.success("Data extraction complete.")
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+        else:
+            st.warning("Please provide an Advertiser ID and upload a file.")
 
     # --- Display Results and Global Download Button ---
     if st.session_state.get('individual_results'):
-        # Abridged for clarity
-        pass
+        st.header("Extracted Creative Details")
+        st.info("Click on each creative to view its trackers.")
+        for creative_data in st.session_state.individual_results:
+            if creative_data:
+                name = creative_data.get('displayName', 'N/A')
+                c_id = creative_data.get('creativeId', 'N/A')
+                with st.expander(f"Creative: {name} (ID: {c_id})"):
+                    trackers = creative_data.get("thirdPartyUrls", [])
+                    if trackers:
+                        reverse_map = {v: k for k, v in TRACKER_MAP_HOSTED_VIDEO.items()}
+                        display_data = [{"event_type": reverse_map.get(t.get('type'), t.get('type')), "url": t.get('url')} for t in trackers]
+                        st.dataframe(pd.DataFrame(display_data))
+                    else:
+                        st.write("No third-party trackers found.")
 
     if st.session_state.get('processed_df') is not None and not st.session_state.processed_df.empty:
-        # Abridged for clarity
-        pass
+        st.header("Download Combined File")
+        excel_data = generate_excel_file(st.session_state.processed_df)
+        st.download_button(
+            label="📥 Download Combined Excel File to Edit",
+            data=excel_data,
+            file_name="dv360_trackers_to_edit.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 
     # --- Phase 2: Upload Edited File for Validation and Review ---
@@ -143,7 +219,7 @@ if creds:
                 st.error(f"An error occurred during validation: {e}")
 
     # --- Phase 3: Final Confirmation ---
-    if 'update_plan' in st.session_state and st.session_state.update_plan is not None:
+    if st.session_state.get('update_plan') is not None:
         st.header("Phase 3: Confirm and Push to DV360")
         st.warning("⚠️ **FINAL WARNING:** This action is irreversible.")
         
@@ -189,7 +265,7 @@ if creds:
                             })
 
                     st.session_state.final_upload_report = pd.DataFrame(upload_results)
-                    st.success("All updates have been processed!")
+                    st.success("All updates have been processed successfully!")
                     
                     # Clear session state for the next run
                     for key in ['processed_df', 'individual_results', 'update_plan']:
@@ -200,7 +276,7 @@ if creds:
                 st.error(f"An error occurred during the final update: {e}")
     
     # --- Final Report Download ---
-    if 'final_upload_report' in st.session_state and st.session_state.final_upload_report is not None:
+    if st.session_state.get('final_upload_report') is not None:
         st.header("Download Upload Status Report")
         report_excel = generate_excel_file(st.session_state.final_upload_report, is_report=True)
         st.download_button(
