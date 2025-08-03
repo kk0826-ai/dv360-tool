@@ -230,8 +230,13 @@ if creds:
                     service = build('displayvideo', 'v3', credentials=creds)
                     
                     upload_results_list = []
+                    
+                    # Add the progress bar for the final update
+                    progress_bar = st.progress(0)
+                    creative_groups = list(plan_df.groupby('creative_id'))
+                    total_creatives = len(creative_groups)
 
-                    for creative_id, group in plan_df.groupby('creative_id'):
+                    for i, (creative_id, group) in enumerate(creative_groups):
                         final_trackers = []
                         adv_id = group['advertiser_id'].iloc[0]
                         
@@ -255,15 +260,15 @@ if creds:
                             status = "❌ Failed"
                             details_msg = str(e)
                         
-                        # Add a status to each row of the original group
                         group['upload_status'] = status
                         group['details'] = details_msg
                         upload_results_list.append(group)
+                        
+                        progress_bar.progress((i + 1) / total_creatives)
 
                     st.session_state.final_upload_report = pd.concat(upload_results_list)
                     st.success("All updates have been processed!")
                     
-                    # Clear session state for the next run
                     for key in ['processed_df', 'individual_results', 'update_plan']:
                         if key in st.session_state:
                             del st.session_state[key]
