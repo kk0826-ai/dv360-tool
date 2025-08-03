@@ -88,6 +88,8 @@ if creds:
         st.session_state.individual_results = None
     if 'update_plan' not in st.session_state:
         st.session_state.update_plan = None
+    if 'final_report_df' not in st.session_state:
+        st.session_state.final_report_df = None
 
 
     # --- Phase 1: Uploader ---
@@ -190,7 +192,6 @@ if creds:
                 with st.spinner("Validating file..."):
                     edited_df = pd.read_excel(edited_file).fillna('')
                     
-                    # --- New, Simplified Validation Logic ---
                     deletes = edited_df[edited_df['new_url'].str.lower() == 'delete']
                     adds = edited_df[edited_df['existing_url'] == '']
                     updates = edited_df[(edited_df['new_url'] != '') & (edited_df['new_url'].str.lower() != 'delete') & (edited_df['existing_url'] != '')]
@@ -214,20 +215,33 @@ if creds:
                 with st.spinner("Sending updates to the DV360 API..."):
                     plan_df = st.session_state.update_plan
                     service = build('displayvideo', 'v3', credentials=creds)
+                    
+                    final_report_data = []
 
                     for creative_id, group in plan_df.groupby('creative_id'):
                         final_trackers = []
                         adv_id = group['advertiser_id'].iloc[0]
+                        creative_name = group['creative_name'].iloc[0]
+
                         for _, row in group.iterrows():
                             # Skip rows marked for deletion
                             if row['new_url'].lower() == 'delete':
                                 continue
                             
                             url_to_use = row['new_url'] if str(row['new_url']).strip() else row['existing_url']
+                            event_type = row['event_type']
                             
-                            if str(row['event_type']).strip() and str(url_to_use).strip():
-                                api_type = TRACKER_MAP_HOSTED_VIDEO.get(row['event_type'], row['event_type'])
+                            if str(event_type).strip() and str(url_to_use).strip():
+                                api_type = TRACKER_MAP_HOSTED_VIDEO.get(event_type, event_type)
                                 final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
+                                # Add to the final report
+                                final_report_data.append({
+                                    "advertiser_id": adv_id,
+                                    "creative_id": creative_id,
+                                    "creative_name": creative_name,
+                                    "event_type": event_type,
+                                    "final_url": str(url_to_use).strip()
+                                })
                         
                         service.advertisers().creatives().patch(
                             advertiserId=str(adv_id),
@@ -236,11 +250,24 @@ if creds:
                             body={"thirdPartyUrls": final_trackers}
                         ).execute()
 
+                    st.session_state.final_report_df = pd.DataFrame(final_report_data)
                     st.success("All updates have been processed successfully!")
-                    # Clear session state to reset the app
+                    
+                    # Clear session state to reset the app for the next run
                     for key in ['processed_df', 'individual_results', 'update_plan']:
                         if key in st.session_state:
                             del st.session_state[key]
 
             except Exception as e:
                 st.error(f"An error occurred during the final update: {e}")
+    
+    # --- Final Report Download ---
+    if st.session_state.get('final_report_df') is not None:
+        st.header("Download Final Change Log")
+        report_excel = generate_excel_file(st.session_state.final_report_df)
+        st.download_button(
+            label="📊 Download Final Change Log",
+            data=report_excel,
+            file_name="final_change_log.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
