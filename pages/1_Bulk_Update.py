@@ -196,33 +196,38 @@ if creds:
                     st.subheader("Review Your Planned Changes")
                     st.info("✅ Your file has been validated successfully.")
                     
-                    # --- New, Simplified, Creative-by-Creative Validation Logic ---
-                    all_creative_ids = set(original_df['creative_id'].astype(str)) | set(edited_df['creative_id'].astype(str))
+                    # --- Final, More Robust Validation Logic ---
+                    # Create a unique "fingerprint" for each tracker based on its content
+                    original_df['fingerprint'] = original_df.apply(lambda r: f"{r['creative_id']}|{r['event_type']}|{r['existing_url']}", axis=1)
+                    
+                    # Determine the final URL for each tracker in the edited file
+                    edited_df['final_url'] = edited_df.apply(lambda r: r['new_url'] if r['new_url'] else r['existing_url'], axis=1)
+                    edited_df['fingerprint'] = edited_df.apply(lambda r: f"{r['creative_id']}|{r['event_type']}|{r['final_url']}", axis=1)
+
+                    # Create sets of fingerprints for comparison
+                    original_fingerprints = set(original_df['fingerprint'])
+                    edited_fingerprints = set(edited_df['fingerprint'])
+
+                    # Find added and deleted trackers
+                    added_fingerprints = edited_fingerprints - original_fingerprints
+                    deleted_fingerprints = original_fingerprints - edited_fingerprints
+
+                    # Find updated trackers
+                    original_key_df = original_df.set_index('fingerprint')
+                    edited_key_df = edited_df.set_index('fingerprint')
+                    common_fingerprints = original_fingerprints.intersection(edited_fingerprints)
                     
                     change_found = False
-                    for cid in sorted(list(all_creative_ids)):
-                        original_creative_df = original_df[original_df['creative_id'].astype(str) == cid]
-                        edited_creative_df = edited_df[edited_df['creative_id'].astype(str) == cid]
-                        
-                        # Create a "fingerprint" for each tracker to handle multiple trackers of the same type
-                        original_trackers = set(original_creative_df.apply(lambda r: f"{r['event_type']}|{r['existing_url']}", axis=1))
-                        
-                        # The final state of trackers is determined by new_url if present, else existing_url
-                        edited_creative_df['final_url'] = edited_creative_df.apply(lambda r: r['new_url'] if r['new_url'] else r['existing_url'], axis=1)
-                        edited_trackers = set(edited_creative_df.apply(lambda r: f"{r['event_type']}|{r['final_url']}", axis=1))
-                        
-                        added = edited_trackers - original_trackers
-                        deleted = original_trackers - edited_trackers
-                        
-                        if added or deleted:
-                            change_found = True
-                            with st.expander(f"Changes for Creative ID: {cid}", expanded=True):
-                                if added:
-                                    st.write(f"🟢 **Added:**")
-                                    st.text('\n'.join(added))
-                                if deleted:
-                                    st.write(f"🔴 **Deleted:**")
-                                    st.text('\n'.join(deleted))
+                    if added_fingerprints or deleted_fingerprints:
+                        change_found = True
+
+                    with st.expander("Detailed Change Summary", expanded=True):
+                        if added_fingerprints:
+                            st.write(f"🟢 **Added:** {len(added_fingerprints)} new trackers.")
+                            st.dataframe(edited_key_df.loc[list(added_fingerprints)])
+                        if deleted_fingerprints:
+                            st.write(f"🔴 **Deleted:** {len(deleted_fingerprints)} trackers.")
+                            st.dataframe(original_key_df.loc[list(deleted_fingerprints)])
 
                     if not change_found:
                         st.success("No additions or deletions were detected.")
