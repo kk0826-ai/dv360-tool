@@ -229,13 +229,12 @@ if creds:
                     plan_df = st.session_state.update_plan
                     service = build('displayvideo', 'v3', credentials=creds)
                     
-                    upload_results = []
+                    upload_results_list = []
 
                     for creative_id, group in plan_df.groupby('creative_id'):
                         final_trackers = []
                         adv_id = group['advertiser_id'].iloc[0]
-                        creative_name = group['creative_name'].iloc[0]
-
+                        
                         for _, row in group.iterrows():
                             if row['new_url'].lower() != 'delete':
                                 url_to_use = row['new_url'] if str(row['new_url']).strip() else row['existing_url']
@@ -243,6 +242,8 @@ if creds:
                                     api_type = TRACKER_MAP_HOSTED_VIDEO.get(row['event_type'], row['event_type'])
                                     final_trackers.append({"type": api_type, "url": str(url_to_use).strip()})
                         
+                        status = "✅ Success"
+                        details_msg = ""
                         try:
                             service.advertisers().creatives().patch(
                                 advertiserId=str(adv_id),
@@ -250,22 +251,17 @@ if creds:
                                 updateMask="thirdPartyUrls",
                                 body={"thirdPartyUrls": final_trackers}
                             ).execute()
-                            upload_results.append({
-                                "creative_id": creative_id,
-                                "creative_name": creative_name,
-                                "upload_status": "✅ Success",
-                                "details": ""
-                            })
                         except Exception as e:
-                            upload_results.append({
-                                "creative_id": creative_id,
-                                "creative_name": creative_name,
-                                "upload_status": "❌ Failed",
-                                "details": str(e)
-                            })
+                            status = "❌ Failed"
+                            details_msg = str(e)
+                        
+                        # Add a status to each row of the original group
+                        group['upload_status'] = status
+                        group['details'] = details_msg
+                        upload_results_list.append(group)
 
-                    st.session_state.final_upload_report = pd.DataFrame(upload_results)
-                    st.success("All updates have been processed successfully!")
+                    st.session_state.final_upload_report = pd.concat(upload_results_list)
+                    st.success("All updates have been processed!")
                     
                     # Clear session state for the next run
                     for key in ['processed_df', 'individual_results', 'update_plan']:
