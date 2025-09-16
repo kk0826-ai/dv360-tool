@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discrepancy Calculator Tool</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #FFCA01; /* MiQ Yellow */
+            --primary-hover: #EAB600;
+            --secondary-color: #7f8c8d;
+            --secondary-hover: #616a6b;
+            --accent-color: #27ae60;
+            --accent-hover: #229954;
+            --danger-color: #e74c3c;
+            --danger-hover: #c0392b;
+            --dark-gray: #2B0030; /* MiQ Midnight Blue */
+            --dark-hover: #4a2b4d;
+            --scarlet-glow: rgba(255, 32, 0, 0.7); /* MiQ Scarlet */
+            --light-gray: #ecf0f1;
+            --medium-gray: #bdc3c7;
+            --text-color: #333;
+            --bg-color: #f8f9fa;
+            --white: #fff;
+            --border-color: #ddd;
+        }
+
+        body {
+            font-family: 'Manrope', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            background-color: var(--bg-color);
+        }
+        .container {
+            background-color: var(--white);
+            padding: 2rem 2.5rem;
+            border-radius: 0;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.07);
+            position: relative;
+        }
+
+        h1, h2, h3, h4 {
+            color: var(--dark-gray);
+            border-bottom: 2px solid var(--light-gray);
+            padding-bottom: 0.75rem;
+            margin-top: 0;
+            font-weight: 700;
+        }
+        h1 {
+           background-color: var(--dark-gray); /* Fallback color if image fails to load */
+           background-image: url('https://i.imgur.com/vjHZbu8.jpeg');
+           background-size: cover;
+           background-position: center;
+           color: var(--white); /* Changed to white for better contrast */
+           padding: 1.5rem 2.5rem;
+           margin: 0;
+           font-size: 1.75rem;
+           border-bottom: 2px solid var(--primary-color);
+           font-family: 'Century Gothic', Arial;
+           font-weight: 400;
+           font-size: 30pt;
+           text-align: center; /* Center Align Text */
+}
+        h2 { font-size: 1.75rem; margin-top: 2rem; }
+        h3 { font-size: 1.25rem; border: none; padding-bottom: 0.5rem; }
+        h4 { font-size: 1.1rem; border: none; padding-bottom: 0; margin-bottom: 1rem;}
+
+        fieldset {
+            border: 1px solid var(--border-color);
+            border-radius: 0;
+            padding: 1.5rem 2rem 2rem;
+            margin-top: 1.5rem;
+            background-color: var(--white);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        legend {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--dark-gray);
+            padding: 0 0.75rem;
+            margin-left: -0.75rem;
+        }
+        
+        .workflow-grid {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 2rem;
+            align-items: stretch;
+        }
+        .workflow-grid .divider {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: var(--dark-gray);
+            font-weight: 700;
+        }
+        .workflow-grid > fieldset { margin-top: 0; }
+        .workflow-option-centered {
+            justify-content: center;
+        }
+        @media (max-width: 900px) {
+            .workflow-grid { grid-template-columns: 1fr; gap: 2rem; }
+            .workflow-grid .divider { display: none; }
+        }
+        
+        button {
+            border: none;
+            border-radius: 0;
+            font-size: 0.95rem;
+            font-weight: 600;
+            padding: 0.5rem 1.25rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        button:disabled { background-color: var(--medium-gray); cursor: not-allowed; }
+        
+        .button-container { text-align: center; margin-top: auto; padding-top: 1.5rem;}
+        #upload-fieldset .button-container {
+            margin-top: 3.5rem;
+            padding-top: 1.5rem;
+        }
+
+        [data-action="combine"], [data-action="process"] { background-color: var(--primary-color); color: var(--dark-gray); }
+        [data-action="combine"]:hover:not(:disabled), [data-action="process"]:hover:not(:disabled) { background-color: var(--primary-hover); }
+        [data-action="add-calculation"] { background-color: var(--accent-color); color: var(--white); }
+        [data-action="add-calculation"]:hover:not(:disabled) { background-color: var(--accent-hover); }
+        
+        .secondary-btn { background-color: #2B0030; color: var(--white); }
+        .secondary-btn:hover:not(:disabled) { background-color: var(--secondary-hover); }
+
+        [data-action="add-metric"], [data-action="add-pre-merge-metric"] {
+            background-color: var(--accent-color);
+            padding: 0.2rem 0.6rem;
+            font-size: 0.8rem;
+            margin-top: 0.75rem; 
+        }
+        [data-action="add-metric"]:hover:not(:disabled), [data-action="add-pre-merge-metric"]:hover:not(:disabled) { background-color: var(--accent-hover); }
+
+        [data-action="clear-results"], [data-action="reset"], [data-action="export"], .back-btn { background-color: var(--dark-gray); color: var(--white); margin-left: 1rem; }
+        [data-action="clear-results"]:hover:not(:disabled), [data-action="reset"]:hover:not(:disabled), [data-action="export"]:hover:not(:disabled), .back-btn:hover:not(:disabled) { background-color: var(--dark-hover); }
+        
+        .back-btn { 
+            padding: 0.25rem 0.75rem; 
+            font-size: 0.85rem; 
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 var(--scarlet-glow); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 32, 0, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 32, 0, 0); }
+        }
+
+        input, select {
+            width: 100%;
+            padding: 0.6rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0;
+            background-color: #fafafa;
+            box-sizing: border-box;
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+        select {-webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23333' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.75rem center; }
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(255, 202, 1, 0.3);
+        }
+
+        /* Multi-select closed-window styles (used only on screen 2) */
+        .multi-select-closed {
+            position: relative;
+            width: 100%;
+            font-size: 0.95rem;
+        }
+        .multi-select-toggle {
+            display: block;
+            text-align: left;
+            padding: 0.6rem;
+            border: 1px solid var(--border-color);
+            background: #fff;
+            cursor: pointer;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .multi-select-toggle:after {
+            content: "▾";
+            float: right;
+            opacity: 0.6;
+        }
+        .multi-select-options {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            border: 1px solid var(--border-color);
+            background: var(--white);
+            max-height: 220px;
+            overflow: auto;
+            z-index: 50;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+        }
+        .multi-select-option {
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            border-bottom: 1px solid #f1f1f1;
+        }
+        .multi-select-option:hover { background: #fafafa; }
+        .multi-select-option.selected { background: #eef9ee; font-weight: 600; color: var(--accent-color); }
+        .multi-select-controls { display:flex; gap:8px; justify-content:flex-end; padding:8px; border-top:1px solid #eee; background:#fff; }
+        .multi-select-controls button { padding:6px 10px; font-size:0.9rem; }
+
+        .file-upload-wrapper { position: relative; display: flex; align-items: center; border: 1px solid var(--border-color); background-color: #fafafa; }
+        .file-input-hidden { display: none; }
+        .file-input-label { background-color: var(--secondary-color); color: white; padding: 0.6rem 1rem; cursor: pointer; transition: background-color 0.3s; display: inline-block; white-space: nowrap;}
+        .file-input-label:hover { background-color: var(--secondary-hover); }
+        .file-names { margin-left: 1rem; color: #555; font-style:; font-size: 0.9rem; }
+        
+        .column-mapper-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 2rem; margin-top: 1.5rem; }
+        .column-mapper-grid fieldset { margin-top: 0; cursor: move; }
+        .form-group { margin-bottom: 1rem; }
+        .report-control-group {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: var(--light-gray);
+            padding: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .report-control-group label {
+            font-size: 0.9em;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--medium-gray);
+            background-color: var(--white);
+            transition: all 0.2s ease;
+        }
+        .report-control-group input { display: none; }
+        .report-control-group input:checked + span {
+            font-weight: bold;
+        }
+        .report-control-group label:has(input:checked) {
+            background-color: var(--dark-gray);
+            color: var(--white);
+            border-color: var(--dark-gray);
+        }
+        
+        .mapper-content-grid, .pre-merge-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;}
+        .metric-section-group { 
+            grid-column: 1 / -1;
+        }
+        .metric-group { 
+            display: flex; 
+            gap: 0.75rem; 
+            align-items: center; 
+            margin-top: 0.5rem; 
+            width: 100%;
+        }
+        .metric-group select { flex-grow: 1; }
+        .remove-metric-btn, .delete-col-btn, .delete-metric-col-btn { 
+            background: none; 
+            border: none; 
+            color: var(--danger-color); 
+            cursor: pointer; 
+            font-size: 1.2rem; 
+            font-weight: bold; 
+            padding: 0 0.5rem; 
+        }
+
+        .stage-2-header { display: flex; justify-content: space-between; align-items: center; }
+        .calc-grid { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; }
+        .calc-grid .form-group { flex: 1; min-width: 200px; }
+        .export-container { padding-bottom: 0 !important; }
+
+        .table-wrapper { max-height: 700px; overflow: auto; border: 1px solid var(--border-color); margin-top: 1.5rem;}
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th, td { border: 1px solid #e0e0e0; padding: 0.6rem 0.75rem; text-align: left; white-space: nowrap; }
+        th { background-color: var(--light-gray); position: sticky; top: 0; font-weight: 600; }
+        .overlay { position: fixed; }
+
+        .page-footer {
+            text-align: center;
+            padding: 1.5rem;
+            margin-top: 2rem;
+            font-size: 0.9rem;
+            color: var(--secondary-color);
+            border-top: 1px solid var(--border-color);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Discrepancy Calculator Tool</h1>
+        <div class="main-content">
+            <div id="processing-overlay" class="overlay" style="display: none;">
+                <div class="overlay-content">Processing...</div>
+            </div>
+
+            <div id="pre-merge-section">
+                <h2>Step 1: Opt your workflow</h2>
+                <div class="workflow-grid">
+                    <fieldset>
+                        <legend>Merge reports</legend>
+                        <p>If you have stats from more than one DSP, merge them here and click below Merge Files & Continue button to proceed.</p>
+                        <div class="upload-section">
+                            <h3>Upload files to merge</h3>
+                            <div class="file-upload-wrapper">
+                                <input type="file" id="pre-merge-files-input" multiple class="file-input-hidden" accept=".csv, .xlsx, .xls">
+                                <label for="pre-merge-files-input" class="file-input-label">Select files</label>
+                                <span id="pre-merge-file-names" class="file-names">No files chosen</span>
+                            </div>
+                        </div>
+                        <div id="pre-merge-mapper" style="display: none;">
+                            <h4>2. Map common columns</h4>
+                            <div class="pre-merge-grid">
+                                <div class="form-group"> <label for="pre-merge-date">Date Column</label> <select id="pre-merge-date"></select> </div>
+                                <div class="form-group"> <label for="pre-merge-id">Placement ID Column(s)</label> <select id="pre-merge-id" multiple size="4"></select> </div>
+                                <div class="form-group metric-section-group"> <label>Metric columns</label> <div id="pre-merge-metrics-mapper"></div> <button type="button" class="add-metric-btn" data-action="add-pre-merge-metric">+ Add Metric</button> </div>
+                            </div>
+                        </div>
+                        <div class="button-container">
+                            <button id="combine-btn" data-action="combine" disabled>Merge files & continue</button>
+                        </div>
+                    </fieldset>
+                    <div class="divider">or</div>
+                    <fieldset class="workflow-option-centered">
+                        <legend>Skip</legend>
+                        <p>If merging files isn't needed, click below on the Skip to Direct Comparison button to upload and compare your reports.</p>
+                        <div class="button-container">
+                            <button class="secondary-btn" data-action="skip-merge">Skip to direct comparison</button>
+                        </div>
+                    </fieldset>
+                </div>
+            </div>
+
+            <div id="main-tool-section" style="display: none;">
+                <div class="stage-2-header">
+                    <h2>Step 2: Upload & map stats</h2>
+                    <button class="back-btn" data-action="go-back">&larr; Back to merge</button>
+                </div>
+                <fieldset id="upload-fieldset">
+                    <div class="upload-section">
+                        <div class="file-upload-wrapper">
+                            <input type="file" id="files-input" multiple class="file-input-hidden" accept=".csv, .xlsx, .xls">
+                            <label for="files-input" class="file-input-label">Select files</label>
+                            <span id="main-tool-file-names" class="file-names">No files chosen</span>
+                        </div>
+                    </div>
+                    <div id="columns-mapper" class="column-mapper-grid"></div>
+                    <div class="button-container">
+                        <button data-action="process">Process & view results</button>
+                        <button data-action="clear-results">Clear results</button>
+                    </div>
+                </fieldset>
+                
+                <div id="calculator-section" style="display: none;">
+                    <fieldset>
+                        <legend>Step 3: Calculate discrepancy</legend>
+                        <div class="calc-grid">
+                            <div class="form-group"> <label for="base-calc-select">Base report</label> <select id="base-calc-select"></select> </div>
+                            <div class="form-group"> <label for="compare-calc-select">Compare report</label> <select id="compare-calc-select"></select> </div>
+                            <div class="form-group"> <label for="metric-select">Metric to compare</label> <select id="metric-select"></select> </div>
+                            <div class="form-group"> <button data-action="add-calculation" id="add-calc-btn" disabled>Add discrepancy</button> </div>
+                        </div>
+                    </fieldset>
+                </div>
+
+                <div id="results-area"></div>
+                <div id="export-container" class="button-container export-container" style="display: none;">
+                    <button data-action="export">Export final report to CSV</button>
+                    <button data-action="reset">Reset / Start new report</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="page-footer">
+        <p>© made by KIRANKUMAR</br>
+MiQ Ad Ops Team</p>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            
+            const mainContainer = document.querySelector('.container');
+            const preMergeSection = document.getElementById('pre-merge-section');
+            const mainToolSection = document.getElementById('main-tool-section');
+            const preMergeFilesInput = document.getElementById('pre-merge-files-input');
+            const preMergeMapper = document.getElementById('pre-merge-mapper');
+            const preMergeDateSelect = document.getElementById('pre-merge-date');
+            const preMergeIdSelect = document.getElementById('pre-merge-id');
+            const preMergeMetricsContainer = document.getElementById('pre-merge-metrics-mapper');
+            const combineBtn = document.getElementById('combine-btn');
+            const preMergeFileNames = document.getElementById('pre-merge-file-names');
+            const filesInput = document.getElementById('files-input');
+            const mainToolFileNames = document.getElementById('main-tool-file-names');
+            const columnsMapperDiv = document.getElementById('columns-mapper');
+            const resultsArea = document.getElementById('results-area');
+            const calculatorSection = document.getElementById('calculator-section');
+            const exportContainer = document.getElementById('export-container');
+            const metricSelect = document.getElementById('metric-select');
+            const baseCalcSelect = document.getElementById('base-calc-select');
+            const compareCalcSelect = document.getElementById('compare-calc-select');
+            const addCalcBtn = document.getElementById('add-calc-btn');
+            const processingOverlay = document.getElementById('processing-overlay');
+
+            // Separator used to join id(s) and date in map keys (use an unlikely sequence)
+            const KEY_SEPARATOR = ' ||| ';
+
+            let fileStore = {};        
+            let mergedData = [];      
+            let masterCalculationStore = []; 
+            let resultsForExport = [];
+            let exportHeaders = [];   
+            let lastSelectedMetric = null; 
+            let sortState = { column: null, direction: 'asc' };
+            let fileCounter = 0;
+
+            const showOverlay = () => { processingOverlay.style.display = 'flex'; };
+            const hideOverlay = () => { processingOverlay.style.display = 'none'; };
+            const cleanFileName = (name) => name.replace(/\.(csv|xlsx|xls)$/i, "");
+            
+            async function getHeaders(file) {
+                const fileExtension = file.name.split('.').pop().toLowerCase();
+                if (['xlsx', 'xls'].includes(fileExtension)) {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            try {
+                                const data = new Uint8Array(e.target.result);
+                                const workbook = XLSX.read(data, { type: 'array' });
+                                const sheetName = workbook.SheetNames[0];
+                                const worksheet = workbook.Sheets[sheetName];
+                                const headers = XLSX.utils.sheet_to_json(worksheet, { header: 1 })[0];
+                                resolve(headers.map(String));
+                            } catch (err) { reject(err); }
+                        };
+                        reader.onerror = reject;
+                        reader.readAsArrayBuffer(file);
+                    });
+                } else {
+                    return new Promise((resolve, reject) => {
+                        Papa.parse(file, { preview: 1, skipEmptyLines: true, complete: (results) => {
+                            if (results.data && results.data.length > 0) resolve(results.data[0]);
+                            else reject(new Error("Could not read CSV headers."));
+                        }, error: (err) => reject(new Error(err.message)) });
+                    });
+                }
+            }
+
+            async function parseFile(file) {
+                const fileExtension = file.name.split('.').pop().toLowerCase();
+                if (['xlsx', 'xls'].includes(fileExtension)) {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            try {
+                                const data = new Uint8Array(e.target.result);
+                                const workbook = XLSX.read(data, { type: 'array' });
+                                const sheetName = workbook.SheetNames[0];
+                                const worksheet = workbook.Sheets[sheetName];
+                                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                                resolve(jsonData);
+                            } catch (err) { reject(err); }
+                        };
+                        reader.onerror = reject;
+                        reader.readAsArrayBuffer(file);
+                    });
+                } else {
+                    return new Promise((resolve, reject) => {
+                        Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => resolve(results.data), error: (err) => reject(new Error(err.message)) });
+                    });
+                }
+            }
+            
+            const standardizeDate = (dateString) => {
+                if (!dateString || String(dateString).trim() === '') return null;
+                if (typeof dateString === 'number' && dateString > 1) {
+                    const excelEpoch = new Date(1899, 11, 30);
+                    const excelDate = new Date(excelEpoch.getTime() + dateString * 86400000);
+                    if(!isNaN(excelDate.getTime())) return excelDate.toISOString().split('T')[0];
+                }
+                const d = new Date(dateString);
+                if (!isNaN(d.getTime()) && d.getFullYear() > 1970) return d.toISOString().split('T')[0];
+                const parts = String(dateString).match(/^(\\d{1,2})[\/\\-\\.](\\d{1,2})[\/\\-\\.](\\d{4})$/);
+                if (parts) {
+                    const year = parseInt(parts[3], 10), month1 = parseInt(parts[1], 10) - 1, day1 = parseInt(parts[2], 10), month2 = parseInt(parts[2], 10) - 1, day2 = parseInt(parts[1], 10);
+                    const d_mdy = new Date(Date.UTC(year, month1, day1));
+                    if (d_mdy && d_mdy.getUTCFullYear() === year && d_mdy.getUTCMonth() === month1 && d_mdy.getUTCDate() === day1) return d_mdy.toISOString().split('T')[0];
+                    const d_dmy = new Date(Date.UTC(year, month2, day2));
+                    if (d_dmy && d_dmy.getUTCFullYear() === year && d_dmy.getUTCMonth() === month2 && d_dmy.getUTCDate() === day2) return d_dmy.toISOString().split('T')[0];
+                }
+                return null;
+            };
+            const calculateDiscrepancy = (base, compare) => {
+                if (base == null || compare == null) return null;
+                if (base >= compare) {
+                    if (base === 0) return 0;
+                    return ((base - compare) / base) * 100;
+                } else {
+                    return ((compare - base) / compare) * 100;
+                }
+            };
+            const formatDiscrepancy = (discrepancy) => {
+                if (discrepancy === null) return '---';
+                if (!isFinite(discrepancy)) return `<span title="Base value was 0, cannot calculate discrepancy.">N/A</span>`;
+                const className = Math.abs(discrepancy) > 10 ? 'discrepancy-high' : 'discrepancy-low';
+                return `<span class="${className}">${discrepancy.toFixed(2)}%</span>`;
+            };
+            const showStatus = (message, type, isAlert = false) => {
+                if (isAlert) { alert(message); } 
+                else { resultsArea.innerHTML = `<div class="status ${type}">${message}</div>`; }
+            };
+
+            const updateFileNamesDisplay = (inputElement, displayElement) => {
+                const files = inputElement.files;
+                if(!files || files.length === 0) {
+                    displayElement.textContent = 'No files chosen';
+                } else if (files.length === 1) {
+                    displayElement.textContent = files[0].name;
+                } else {
+                    displayElement.textContent = `${files.length} files selected`;
+                }
+            };
+
+            preMergeFilesInput.addEventListener('change', (e) => {
+                handlePreMergeFileSelect(e);
+                updateFileNamesDisplay(preMergeFilesInput, preMergeFileNames);
+            });
+
+            async function handlePreMergeFileSelect(event) {
+                const files = event.target.files;
+                if (files.length === 0) {
+                    preMergeMapper.style.display = 'none';
+                    combineBtn.disabled = true;
+                    return;
+                }
+                try {
+                    const headers = await getHeaders(files[0]);
+                    const defaultOption = '<option value="" selected disabled>-- Select Column --</option>';
+                    const headerOptions = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+                    preMergeDateSelect.innerHTML = defaultOption + headerOptions;
+                    // For placement id allow multiple (pre-merge keeps multi-select visible)
+                    preMergeIdSelect.innerHTML = headerOptions;
+                    preMergeMetricsContainer.innerHTML = '';
+                    await addMetricSelector(preMergeMetricsContainer, files[0], true);
+                    preMergeMapper.style.display = 'block';
+                    combineBtn.disabled = false;
+                } catch (error) {
+                    alert(`Error reading headers from ${files[0].name}: ${error.message}`);
+                }
+            }
+
+            async function addMetricSelector(container, file, isPreMerge = true) {
+                const headers = await getHeaders(file);
+                const defaultOption = '<option value="" selected disabled>-- Select Metric --</option>';
+                const headerOptions = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+                const metricGroup = document.createElement('div');
+                metricGroup.className = 'metric-group';
+                const selectorClass = isPreMerge ? 'pre-merge-metric-selector' : 'metric-selector';
+                metricGroup.innerHTML = `<select class="${selectorClass}">${defaultOption}${headerOptions}</select> <button type="button" class="remove-metric-btn" title="Remove this metric" data-action="remove-metric-row">×</button>`;
+                container.appendChild(metricGroup);
+            }
+
+            async function handlePreMerge() {
+                showOverlay();
+                try {
+                    const files = preMergeFilesInput.files;
+                    const cols = {
+                        date: preMergeDateSelect.value,
+                        // multiple selection for pre-merge id may return multiple selectedOptions
+                        id: Array.from(preMergeIdSelect.selectedOptions).map(o => o.value).filter(Boolean),
+                        metrics: Array.from(document.querySelectorAll('.pre-merge-metric-selector')).map(s => s.value).filter(Boolean)
+                    };
+                    if (!cols.date || !cols.id || cols.id.length === 0 || cols.metrics.length === 0) {
+                        throw new Error("Please map Date, at least one Placement ID column, and at least one Metric for the files being merged.");
+                    }
+                    const allData = [];
+                    for (const file of files) {
+                        const parsed = await parseFile(file);
+                        allData.push(...parsed);
+                    }
+                    const aggregatedMap = aggregateDataByDateAndId(allData, cols);
+                    const finalDataArray = [];
+                    const finalHeaders = ['Date', 'Placement ID', ...cols.metrics];
+                    for (const [key, value] of aggregatedMap.entries()) {
+                        const [id, date] = key.split(KEY_SEPARATOR);
+                        const row = { 'Date': date, 'Placement ID': id };
+                        for(const metric of cols.metrics) {
+                            row[metric] = value[metric];
+                        }
+                        finalDataArray.push(row);
+                    }
+                    const csvString = Papa.unparse(finalDataArray, { header: true, columns: finalHeaders });
+                    const mergedFile = new File([csvString], "Merged-Report.csv", { type: "text/csv" });
+                    await showMainTool([mergedFile]);
+                } catch (error) {
+                    alert(`Error during pre-merge: ${error.message}`);
+                } finally {
+                    hideOverlay();
+                }
+            }
+
+            async function showMainTool(initialFiles) {
+                preMergeSection.style.display = 'none';
+                mainToolSection.style.display = 'block';
+                if (initialFiles && initialFiles.length > 0) {
+                    await addFilesToTool(initialFiles);
+                }
+            }
+            
+            filesInput.addEventListener('change', async (e) => {
+                await addFilesToTool(e.target.files)
+                updateFileNamesDisplay(filesInput, mainToolFileNames);
+            });
+            metricSelect.addEventListener('change', (e) => { lastSelectedMetric = e.target.value; });
+
+            async function addFilesToTool(files) {
+                for (const file of files) {
+                    const key = `file_${fileCounter++}`;
+                    fileStore[key] = { file, originalName: file.name, selectedIds: [] };
+                    await renderColumnMapper(key);
+                }
+                new Sortable(columnsMapperDiv, { animation: 150, ghostClass: 'sortable-ghost' });
+            }
+
+            async function renderColumnMapper(key) {
+                const { file, originalName } = fileStore[key];
+                const headers = await getHeaders(file);
+                fileStore[key].headers = headers;
+                const defaultOption = '<option value="" selected disabled>-- Select Column --</option>';
+                const headerOptions = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+                // For screen 2 (main tool) we build a closed multi-select UI for placement id
+                const wrapperDiv = document.createElement('div');
+                wrapperDiv.innerHTML = `
+                    <fieldset>
+                        <legend>${cleanFileName(originalName)}</legend>
+                        <div class="report-control-group"> 
+                            <label><input type="radio" name="base-report-selector" value="${key}"><span>Set as base</span></label> 
+                            <label><input type="checkbox" class="include-report-checkbox" data-key="${key}" checked><span>Include</span></label> 
+                        </div>
+                        <div class="mapper-content-grid">
+                            <div class="form-group"> <label for="${key}-date">Date column</label> <select id="${key}-date">${defaultOption}${headerOptions}</select> </div>
+                            <div class="form-group"> <label for="${key}-id">Placement ID column(s) (click to open)</label> 
+                                <div class="multi-select-closed" id="${key}-id-container">
+                                  <button type="button" class="multi-select-toggle">-- Select Column --</button>
+                                  <div class="multi-select-options" style="display:none"></div>
+                                </div>
+                              </div>
+                            <div class="form-group metric-section-group"> <label>Metric columns</label> <div id="${key}-metrics-mapper"></div> <button type="button" class="add-metric-btn" data-action="add-metric" data-key="${key}">+ Add metric</button> </div>
+                        </div>
+                    </fieldset>`;
+                columnsMapperDiv.appendChild(wrapperDiv);
+                // After appended, setup multi-select behavior for main-tool (closed window)
+                setupMultiSelectForKey(key, headers);
+            }
+
+            function setupMultiSelectForKey(key, headers) {
+                const container = document.getElementById(`${key}-id-container`);
+                if (!container) return;
+                const toggle = container.querySelector('.multi-select-toggle');
+                const optionsDiv = container.querySelector('.multi-select-options');
+                const store = fileStore[key];
+                // build options + controls (Done / Cancel)
+                optionsDiv.innerHTML = headers.map(h => `<div class="multi-select-option" data-value="${h}">${h}</div>`).join('') +
+                                       `<div class="multi-select-controls"><button type="button" class="multi-select-done">Done</button><button type="button" class="multi-select-cancel">Cancel</button></div>`;
+
+                // helper to refresh option classes
+                const refreshOptionSelection = () => {
+                    optionsDiv.querySelectorAll('.multi-select-option').forEach(opt => {
+                        opt.classList.toggle('selected', store.selectedIds.includes(opt.dataset.value));
+                    });
+                };
+
+                // clicking toggle opens/closes. On open, save previous selection so Cancel/Outside can revert
+                let prevSelected = [];
+                toggle.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const visible = optionsDiv.style.display === 'block';
+                    // close other dropdowns
+                    document.querySelectorAll('.multi-select-options').forEach(d => { if (d !== optionsDiv) d.style.display = 'none'; });
+                    if (!visible) {
+                        prevSelected = store.selectedIds.slice();
+                        optionsDiv.style.display = 'block';
+                        refreshOptionSelection();
+                    } else {
+                        optionsDiv.style.display = 'none';
+                    }
+                });
+
+                // clicking an option toggles selection but does NOT close the dropdown
+                optionsDiv.addEventListener('click', (e) => {
+                    const opt = e.target.closest('.multi-select-option');
+                    if (opt) {
+                        const val = opt.dataset.value;
+                        const idx = store.selectedIds.indexOf(val);
+                        if (idx === -1) { store.selectedIds.push(val); opt.classList.add('selected'); }
+                        else { store.selectedIds.splice(idx, 1); opt.classList.remove('selected'); }
+                        return;
+                    }
+                    const doneBtn = e.target.closest('.multi-select-done');
+                    if (doneBtn) {
+                        optionsDiv.style.display = 'none';
+                        toggle.textContent = store.selectedIds.length ? store.selectedIds.join(', ') : '-- Select Column --';
+                        return;
+                    }
+                    const cancelBtn = e.target.closest('.multi-select-cancel');
+                    if (cancelBtn) {
+                        store.selectedIds = prevSelected.slice();
+                        refreshOptionSelection();
+                        toggle.textContent = store.selectedIds.length ? store.selectedIds.join(', ') : '-- Select Column --';
+                        optionsDiv.style.display = 'none';
+                        return;
+                    }
+                });
+
+                // click outside: behave like Cancel (revert)
+                const outsideHandler = (e) => {
+                    if (!container.contains(e.target) && optionsDiv.style.display === 'block') {
+                        store.selectedIds = prevSelected.slice();
+                        refreshOptionSelection();
+                        toggle.textContent = store.selectedIds.length ? store.selectedIds.join(', ') : '-- Select Column --';
+                        optionsDiv.style.display = 'none';
+                    }
+                };
+                document.addEventListener('click', outsideHandler);
+            }
+
+            async function addMetricMapper(key) {
+                const container = document.getElementById(`${key}-metrics-mapper`);
+                if (!container || !fileStore[key]) return;
+                
+                if (!fileStore[key].headers) {
+                    try {
+                        fileStore[key].headers = await getHeaders(fileStore[key].file);
+                    } catch (e) { console.error("Could not get headers for metric mapper:", e); return; }
+                }
+                await addMetricSelector(container, fileStore[key].file, false);
+            }
+
+            async function processFiles() {
+                masterCalculationStore = [];
+                sortState = { column: null, direction: 'asc' };
+                showOverlay();
+                try {
+                    const { activeKeys, baseKey, activeFileStore } = getActiveConfig();
+                    if (activeKeys.length < 1) throw new Error("Please include at least one report to process.");
+                    if (!baseKey) throw new Error("Please select a Base Report.");
+                    if (!activeKeys.includes(baseKey)) throw new Error("The Base Report must also be marked as 'Include'.");
+                    for (const key of activeKeys) {
+                        const cols = activeFileStore[key].cols;
+                        const hasId = Array.isArray(cols.id) ? cols.id.length > 0 : !!cols.id;
+                        if (!hasId || !cols.date) throw new Error(`Date and Placement ID are mandatory for: ${activeFileStore[key].originalName}.`);
+                    }
+                    const parsedDataPromises = Object.keys(activeFileStore).map(key => parseFile(activeFileStore[key].file).then(data => ({ key, data })));
+                    const allParsedData = await Promise.all(parsedDataPromises);
+                    const dailyAggregatedMaps = {};
+                    for (const { key, data } of allParsedData) {
+                        dailyAggregatedMaps[key] = aggregateDataByDateAndId(data, activeFileStore[key].cols);
+                    }
+                    mergedData = mergeDailyData(dailyAggregatedMaps, activeFileStore);
+                    if (mergedData.length === 0) throw new Error("No rows with a valid Placement ID and Date were found in the reports.");
+                    renderRawDataTable(activeFileStore);
+                    populateCalculatorDropdowns(activeFileStore);
+                    initializeDragAndDrop();
+                    calculatorSection.style.display = 'block';
+                    exportContainer.style.display = 'block';
+                } catch (error) {
+                    showStatus(error.message, 'error', true);
+                } finally {
+                    hideOverlay();
+                }
+            }
+            
+            function getActiveConfig() {
+                const activeKeys = Array.from(document.querySelectorAll('.include-report-checkbox:checked')).map(cb => cb.dataset.key);
+                const baseKey = document.querySelector('input[name="base-report-selector"]:checked')?.value || null;
+                const activeFileStore = {};
+                for (const key of activeKeys) {
+                    // ID values: support two UI types:
+                    // - legacy select (pre-merge or previous versions): element with id `${key}-id` and multiple options
+                    // - new closed-window UI (main tool): container `${key}-id-container` and internal fileStore.selectedIds
+                    const idSelect = document.getElementById(`${key}-id`);
+                    let idVals = [];
+                    if (idSelect && idSelect.tagName === 'SELECT' && idSelect.multiple) {
+                        idVals = Array.from(idSelect.selectedOptions).map(o => o.value).filter(Boolean);
+                    } else {
+                        const store = fileStore[key];
+                        idVals = store && Array.isArray(store.selectedIds) ? store.selectedIds.slice() : [];
+                    }
+                    activeFileStore[key] = {
+                        ...fileStore[key],
+                        type: (key === baseKey) ? 'base' : 'compare',
+                        cols: {
+                            date: document.getElementById(`${key}-date`).value,
+                            id: idVals,
+                            metrics: Array.from(document.querySelectorAll(
+                                `#${key}-metrics-mapper .metric-selector`
+                            )).map(s => s.value).filter(Boolean)
+                        }
+                    };
+                }
+                return { activeKeys, baseKey, activeFileStore };
+            }
+
+            function aggregateDataByDateAndId(data, cols) {
+                const aggregatedMap = new Map();
+                for (const row of data) {
+                    // Determine ID using one or more columns
+                    let idValue = null;
+                    if (Array.isArray(cols.id)) {
+                        const parts = cols.id.map(col => (row[col] !== undefined && row[col] !== null) ? String(row[col]).trim() : '').filter(Boolean);
+                        if (parts.length > 0) idValue = parts.join(' | ');
+                    } else {
+                        idValue = row[cols.id] ? String(row[cols.id]).trim() : null;
+                    }
+
+                    const sDate = standardizeDate(row[cols.date]);
+                    if (idValue && sDate) {
+                        const key = `${idValue}${KEY_SEPARATOR}${sDate}`;
+                        if (!aggregatedMap.has(key)) {
+                            const newEntry = {};
+                            cols.metrics.forEach(metric => newEntry[metric] = 0);
+                            aggregatedMap.set(key, newEntry);
+                        }
+                        const existingEntry = aggregatedMap.get(key);
+                        cols.metrics.forEach(metric => {
+                            const val = parseFloat(row[metric]);
+                            if (!isNaN(val)) existingEntry[metric] += val;
+                        });
+                    }
+                }
+                return aggregatedMap;
+            }
+
+            function mergeDailyData(dailyAggregatedMaps, currentFileStore) {
+                const allKeys = new Set();
+                for (const key in currentFileStore) {
+                    for (const dataKey of dailyAggregatedMaps[key].keys()) {
+                        allKeys.add(dataKey);
+                    }
+                }
+
+                const finalResults = [];
+                for (const key of allKeys) {
+                    const [id, date] = key.split(KEY_SEPARATOR);
+                    const resultRow = { 'Placement ID': id, 'Date': date };
+                    for (const fileKey in currentFileStore) {
+                        const fileInfo = currentFileStore[fileKey];
+                        const currentFileMetrics = dailyAggregatedMaps[fileKey].get(key);
+                        fileInfo.cols.metrics.forEach(metric => {
+                            resultRow[
+                                `${fileKey}_${metric}`
+                            ] = currentFileMetrics ? currentFileMetrics[metric] : null;
+                        });
+                    }
+                    finalResults.push(resultRow);
+                }
+                return finalResults.sort((a, b) => a.Date.localeCompare(b.Date) || String(a['Placement ID']).localeCompare(String(b['Placement ID'])));
+            }
+
+            function renderRawDataTable(currentFileStore) {
+                exportHeaders = ['Date', 'Placement ID'];
+                const metricHeaders = [];
+                const sortedKeys = Object.keys(currentFileStore).sort((a,b) => (currentFileStore[a].type === 'base') ? -1 : 1);
+                for(const key of sortedKeys) {
+                    const fileInfo = currentFileStore[key];
+                    fileInfo.cols.metrics.forEach(metric => {
+                        metricHeaders.push(`${cleanFileName(fileInfo.originalName)} ${metric}`);
+                    });
+                }
+                exportHeaders.push(...metricHeaders);
+                
+                resultsForExport = mergedData.map(row => {
+                    const exportRow = {};
+                    exportHeaders.forEach(header => {
+                        if (header === 'Date' || header === 'Placement ID') {
+                            exportRow[header] = row[header];
+                        } else {
+                            const match = header.match(/(.+) (.+)/);
+                            if (match) {
+                                const [_, fileName, metricName] = match;
+                                const fileKey = Object.keys(currentFileStore).find(k => cleanFileName(currentFileStore[k].originalName) === fileName);
+                                if (fileKey) exportRow[header] = row[`${fileKey}_${metricName}`];
+                            }
+                        }
+                    });
+                    return exportRow;
+                });
+                redrawTable();
+            }
+
+            function addDiscrepancyCalculation(params) {
+                const { activeFileStore } = getActiveConfig();
+                const metric = params ? params.metric : metricSelect.value;
+                const baseKey = params ? params.baseKey : baseCalcSelect.value;
+                const compareKey = params ? params.compareKey : compareCalcSelect.value;
+                const discHeaderText = getCalculationId(metric, baseKey, compareKey, activeFileStore);
+                if (exportHeaders.includes(discHeaderText)) {
+                    if (params) return;
+                    showStatus("This calculation has already been added.", "error", true);
+                    return;
+                }
+                const requiredMetricHeaders = [];
+                for (const key in activeFileStore) {
+                    if (activeFileStore[key].cols.metrics.includes(metric)) {
+                        const headerName = `${cleanFileName(activeFileStore[key].originalName)} ${metric}`;
+                        requiredMetricHeaders.push(headerName);
+                    }
+                }
+                requiredMetricHeaders.forEach(header => {
+                    if (!exportHeaders.includes(header)) exportHeaders.push(header);
+                });
+                if (!params) { masterCalculationStore.push({ metric, baseKey, compareKey }); }
+                exportHeaders.push(discHeaderText);
+                resultsForExport.forEach((row, index) => {
+                    const baseValue = mergedData[index][`${baseKey}_${metric}`];
+                    const compareValue = mergedData[index][`${compareKey}_${metric}`];
+                    row[discHeaderText] = calculateDiscrepancy(baseValue, compareValue);
+                });
+                redrawTable();
+                initializeDragAndDrop();
+            }
+            
+            function deleteDiscrepancyColumn(headerText) {
+                const colIndex = exportHeaders.indexOf(headerText);
+                if (colIndex === -1) return;
+                exportHeaders.splice(colIndex, 1);
+                masterCalculationStore = masterCalculationStore.filter(c => {
+                    const { activeFileStore } = getActiveConfig();
+                    return getCalculationId(c.metric, c.baseKey, c.compareKey, activeFileStore) !== headerText
+                });
+                resultsForExport.forEach(row => delete row[headerText]);
+                redrawTable();
+                initializeDragAndDrop();
+            }
+            
+            function deleteMetricColumn(metricName) {
+                const headersToRemove = exportHeaders.filter(h => h.endsWith(` ${metricName}`) || h.startsWith(`Disc % (${metricName})`));
+                exportHeaders = exportHeaders.filter(h => !headersToRemove.includes(h));
+                masterCalculationStore = masterCalculationStore.filter(c => c.metric !== metricName);
+                redrawTable();
+                initializeDragAndDrop();
+            }
+
+            function getCalculationId(metric, baseKey, compareKey, store) {
+                const baseName = cleanFileName(store[baseKey].originalName);
+                const compareName = cleanFileName(store[compareKey].originalName);
+                return `Disc % (${metric}) ${baseName} vs ${compareName}`;
+            }
+
+            function sortResults(headerText) {
+                if (sortState.column === headerText) sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+                else {
+                    sortState.column = headerText;
+                    sortState.direction = 'asc';
+                }
+                resultsForExport.sort((a, b) => {
+                    const valA = a[sortState.column], valB = b[sortState.column];
+                    const isANonSortable = valA === null || !isFinite(valA), isBNonSortable = valB === null || !isFinite(valB);
+                    if (isANonSortable && isBNonSortable) return 0;
+                    if (isANonSortable) return 1;
+                    if (isBNonSortable) return -1;
+                    const direction = sortState.direction === 'asc' ? 1 : -1;
+                    return (valA - valB) * direction;
+                });
+                redrawTable();
+                initializeDragAndDrop();
+            }
+
+            function redrawTable() {
+                resultsArea.innerHTML = '';
+                if (resultsForExport.length === 0) return;
+                let tableHtml = `<h2>Results <span style="font-size:0.6em; color:#555;"></span></h2><div class="table-wrapper"><table><thead><tr>`;
+                tableHtml += exportHeaders.map(h => {
+                    const isDiscrepancyCol = h.startsWith('Disc %');
+                    const isMetricCol = !isDiscrepancyCol && h !== 'Date' && h !== 'Placement ID';
+                    const thClass = isDiscrepancyCol ? 'sortable-header column-draggable' : 'column-draggable';
+                    let sortIndicator = '';
+                    if (isDiscrepancyCol && sortState.column === h) sortIndicator = ' &#9652;';
+                    let deleteButton = '';
+                    if (isDiscrepancyCol) deleteButton = `<span class="delete-col-btn" data-action="delete-discrepancy" data-header="${h}" title="Remove column">(x)</span>`;
+                    else if (isMetricCol) {
+                        const metricName = h.substring(h.lastIndexOf(' ') + 1);
+                        deleteButton = `<span class="delete-metric-col-btn" data-action="delete-metric" data-metric="${metricName}" title="Remove all ${metricName} columns">(x)</span>`;
+                    }
+                    return `<th class="${thClass}" data-header="${h}">${h}${sortIndicator} ${deleteButton}</th>`;
+                }).join('');
+                tableHtml += '</tr></thead><tbody>';
+                tableHtml += resultsForExport.map(row => '<tr>' + exportHeaders.map(header => `<td>${header.startsWith('Disc %') ? formatDiscrepancy(row[header]) : (row[header]?.toLocaleString() ?? row[header]) ?? ''}</td>`).join('') + '</tr>').join('');
+                tableHtml += '</tbody></table></div>';
+                resultsArea.innerHTML = tableHtml;
+            }
+
+            function initializeDragAndDrop() {
+                const headerRow = resultsArea.querySelector('thead tr');
+                if (headerRow) {
+                    new Sortable(headerRow, { animation: 150, ghostClass: 'sortable-ghost', filter: '.delete-col-btn, .delete-metric-col-btn', preventOnFilter: true, onEnd: (evt) => {
+                        exportHeaders.splice(evt.newDraggableIndex, 0, exportHeaders.splice(evt.oldDraggableIndex, 1)[0]);
+                        redrawTable(); 
+                        initializeDragAndDrop();
+                    }});
+                }
+            }
+            
+            function clearResults() {
+                resultsArea.innerHTML = '', calculatorSection.style.display = 'none', exportContainer.style.display = 'none';
+                mergedData = [], resultsForExport = [], exportHeaders = [], masterCalculationStore = [];
+                sortState = { column: null, direction: 'asc' };
+            }
+
+            function resetTool() {
+                clearResults();
+                fileStore = {}, fileCounter = 0;
+                columnsMapperDiv.innerHTML = '', filesInput.value = '';
+                preMergeSection.style.display = 'block';
+                mainToolSection.style.display = 'none';
+                preMergeFilesInput.value = '';
+                preMergeMapper.style.display = 'none';
+                combineBtn.disabled = true;
+                updateFileNamesDisplay(preMergeFilesInput, preMergeFileNames);
+                updateFileNamesDisplay(filesInput, mainToolFileNames);
+            }
+
+            function populateCalculatorDropdowns(currentFileStore) {
+                baseCalcSelect.innerHTML = '', compareCalcSelect.innerHTML = '';
+                const baseKey = Object.keys(currentFileStore).find(k => currentFileStore[k].type === 'base');
+                if (baseKey) baseCalcSelect.add(new Option(cleanFileName(currentFileStore[baseKey].originalName), baseKey));
+                Object.values(currentFileStore).filter(f => f.type === 'compare').forEach(f => {
+                    const key = Object.keys(currentFileStore).find(k => currentFileStore[k].originalName === f.originalName);
+                    if (key) compareCalcSelect.add(new Option(cleanFileName(f.originalName), key));
+                });
+                const updateAndListen = () => updateMetricDropdown(currentFileStore);
+                baseCalcSelect.onchange = updateAndListen;
+                compareCalcSelect.onchange = updateAndListen;
+                updateMetricDropdown(currentFileStore);
+            }
+            
+            function updateMetricDropdown(currentFileStore) {
+                metricSelect.innerHTML = '<option value="" selected disabled>-- Select Metric --</option>';
+                const baseKey = baseCalcSelect.value, compareKey = compareCalcSelect.value;
+                if (!baseKey || !compareKey || !currentFileStore[baseKey] || !currentFileStore[compareKey]) {
+                    addCalcBtn.disabled = true; return;
+                }
+                const baseMetrics = new Set(currentFileStore[baseKey].cols.metrics);
+                const compareMetrics = new Set(currentFileStore[compareKey].cols.metrics);
+                const commonMetrics = [...baseMetrics].filter(metric => compareMetrics.has(metric));
+                
+                if (commonMetrics.length === 0) {
+                    metricSelect.innerHTML = '<option value="" disabled>No common metrics</option>';
+                    addCalcBtn.disabled = true;
+                    lastSelectedMetric = null; 
+                } else {
+                    commonMetrics.forEach(metric => metricSelect.add(new Option(metric, metric)));
+                    addCalcBtn.disabled = false;
+                    if (lastSelectedMetric && commonMetrics.includes(lastSelectedMetric)) metricSelect.value = lastSelectedMetric;
+                    else lastSelectedMetric = metricSelect.value;
+                }
+            }
+            
+            function exportResults() {
+                if (resultsForExport.length === 0) { alert("No data to export."); return; }
+                const exportData = resultsForExport.map(row => {
+                    const cleanRow = {};
+                    exportHeaders.forEach(h => {
+                        const val = row[h];
+                        if (h.startsWith('Disc %')) {
+                            if(val === null) cleanRow[h] = '---';
+                            else if (!isFinite(val)) cleanRow[h] = 'N/A';
+                            else cleanRow[h] = val.toFixed(2);
+                        } else { cleanRow[h] = val; }
+                    });
+                    return cleanRow;
+                });
+                const csv = Papa.unparse({ fields: exportHeaders, data: exportData });
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'discrepancy_report.csv';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+
+            mainContainer.addEventListener('click', async (event) => {
+                const actionTarget = event.target.closest('[data-action]');
+                if (!actionTarget) {
+                     const headerCell = event.target.closest('th.sortable-header');
+                     if(headerCell) sortResults(headerCell.dataset.header);
+                     return;
+                }
+                const action = actionTarget.dataset.action;
+                switch(action) {
+                    case 'skip-merge': await showMainTool([]); break;
+                    case 'combine': await handlePreMerge(); break;
+                    case 'add-pre-merge-metric': await addMetricSelector(preMergeMetricsContainer, preMergeFilesInput.files[0]); break;
+                    case 'remove-metric-row': event.target.closest('.metric-group').remove(); break;
+                    case 'add-metric': await addMetricMapper(actionTarget.dataset.key); break;
+                    case 'process': await processFiles(); break;
+                    case 'clear-results': clearResults(); break;
+                    case 'add-calculation': addDiscrepancyCalculation(null); break;
+                    case 'export': exportResults(); break;
+                    case 'reset': resetTool(); break;
+                    case 'go-back':
+                        if (confirm("Are you sure? Going back will clear all reports and mappings on this screen.")) {
+                            resetTool();
+                        }
+                        break;
+                    case 'delete-discrepancy':
+                        event.stopPropagation();
+                        deleteDiscrepancyColumn(actionTarget.dataset.header);
+                        break;
+                    case 'delete-metric':
+                         event.stopPropagation();
+                         deleteMetricColumn(actionTarget.dataset.metric);
+                        break;
+                }
+            });
+
+        });
+    </script>
+</body>
+</html>
